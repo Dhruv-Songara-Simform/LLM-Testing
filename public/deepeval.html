@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DeepEval Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/html2pdf@0.10.1/dist/html2pdf.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
     * {
       margin: 0;
@@ -617,6 +617,35 @@
           </p>
         </div>
 
+        <!-- Metrics Configuration -->
+        <div style="border-top: 2px solid #e0e0e0; margin-top: 20px; padding-top: 20px;">
+          <h3 style="color: #333; font-size: 14px; margin-bottom: 12px; font-weight: 700;">📊 Quality Metrics</h3>
+
+          <!-- Custom Metrics Input -->
+          <div class="form-group" style="background: #f0f7ff; border: 1px solid #e3f2fd; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+            <label for="customMetricInput">Add Custom Metric (Optional)</label>
+            <textarea
+              id="customMetricInput"
+              placeholder="E.g., 'Response length 50-500 words' or 'Must cite sources'"
+              style="min-height: 60px; font-size: 13px; border: 1px solid #c5d9f1; background: white;"
+            ></textarea>
+            <button onclick="addCustomMetric()" style="width: 100%; margin-top: 8px;">➕ Add Metric</button>
+          </div>
+
+          <!-- Unified Metrics List -->
+          <div style="background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+            <div style="font-size: 11px; color: #999; font-weight: 600; margin-bottom: 10px; text-transform: uppercase;">
+              📋 Metrics to Evaluate (<span id="metricsCounter">8</span>)
+            </div>
+            <div id="metricsListContainer" style="max-height: 250px; overflow-y: auto;"></div>
+          </div>
+
+          <div style="background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; padding: 10px; font-size: 12px;">
+            <span style="color: #2e7d32; font-weight: 600;">✓ Ready: </span>
+            <span id="readySummary">8 metrics selected</span>
+          </div>
+        </div>
+
         <div class="button-group">
           <button onclick="runDeepEval()">▶ Run DeepEval</button>
         </div>
@@ -741,50 +770,55 @@
 
         <div id="artifacts" class="tab-content">
           <div style="margin-bottom: 24px;">
-            <h3>📋 Custom Metrics Configuration</h3>
-            <div style="background: #f9f9f9; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
-              <div class="form-group">
-                <label for="customMetricInput">Describe Custom Metric *</label>
-                <textarea
-                  id="customMetricInput"
-                  placeholder="E.g., 'Response length should be between 50-500 words' or 'Ensure response uses bullet points'"
-                  style="min-height: 80px; width: 100%;"
-                ></textarea>
+            <h3 style="margin-bottom: 16px; color: #333;">📥 Export Evaluation Report</h3>
+
+            <!-- PDF Report Download -->
+            <div style="background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 100%); border: 1px solid #c5cae9; border-radius: 12px; padding: 24px; margin-bottom: 16px;">
+              <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
+                <div style="width: 52px; height: 52px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0;">📄</div>
+                <div>
+                  <h4 style="margin: 0 0 4px 0; color: #333; font-size: 16px;">Professional PDF Report</h4>
+                  <p style="margin: 0; color: #666; font-size: 13px;">Full evaluation analysis including metric scores, pass/fail results, conversation log, and performance summary.</p>
+                </div>
               </div>
-              <div class="button-group">
-                <button onclick="addCustomMetric()" style="flex: 1;">➕ Add Custom Metric</button>
-                <button onclick="proceedToMetricsSelection()" class="btn-secondary" style="flex: 1;">✓ Next</button>
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px;">
+                <div style="background: white; border-radius: 8px; padding: 12px; text-align: center; border: 1px solid #e0e0e0;">
+                  <div style="font-size: 20px; margin-bottom: 4px;">📊</div>
+                  <div style="font-size: 12px; color: #666; font-weight: 600;">All Metric Scores</div>
+                </div>
+                <div style="background: white; border-radius: 8px; padding: 12px; text-align: center; border: 1px solid #e0e0e0;">
+                  <div style="font-size: 20px; margin-bottom: 4px;">💬</div>
+                  <div style="font-size: 12px; color: #666; font-weight: 600;">Conversation Log</div>
+                </div>
+                <div style="background: white; border-radius: 8px; padding: 12px; text-align: center; border: 1px solid #e0e0e0;">
+                  <div style="font-size: 20px; margin-bottom: 4px;">🎯</div>
+                  <div style="font-size: 12px; color: #666; font-weight: 600;">Custom Metrics</div>
+                </div>
               </div>
+              <button onclick="generatePDFReport()" style="width: 100%; background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%); padding: 14px; font-size: 15px; border-radius: 8px;">
+                📥 Download PDF Report
+              </button>
+              <p style="margin: 10px 0 0 0; color: #999; font-size: 12px; text-align: center;">Run an evaluation first to include full metric results in the report</p>
             </div>
 
-            <div id="customMetricsSection" style="display: none;">
-              <h4 style="margin-bottom: 12px;">Custom Metrics Added: <span id="customMetricCount">0</span></h4>
-              <div id="customMetricsList" style="margin-bottom: 24px;"></div>
-
-              <h4 style="margin-bottom: 12px;">Select Metrics to Include in Report</h4>
-
-              <div style="margin-bottom: 20px;">
-                <h5 style="color: #666; margin-bottom: 12px; font-weight: 600;">📊 Built-in Metrics</h5>
-                <div id="builtinMetricsCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+            <!-- JSON Export -->
+            <div style="background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div style="width: 40px; height: 40px; background: #667eea; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px;">💾</div>
+                  <div>
+                    <div style="font-weight: 600; color: #333; font-size: 14px;">Raw JSON Export</div>
+                    <div style="color: #999; font-size: 12px;">Machine-readable metrics data for CI/CD pipelines</div>
+                  </div>
                 </div>
-              </div>
-
-              <div style="margin-bottom: 24px;">
-                <h5 style="color: #666; margin-bottom: 12px; font-weight: 600;">🎯 Custom Metrics</h5>
-                <div id="customMetricsCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
-                </div>
-              </div>
-
-              <div style="border-top: 1px solid #ddd; padding-top: 16px;">
-                <button onclick="generatePDFReport()" style="width: 100%; background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%); margin-bottom: 8px;">
-                  📥 Download PDF Report
-                </button>
-                <button onclick="exportMetricsJSON()" style="width: 100%; background: #667eea;" class="btn-secondary">
-                  💾 Export as JSON
+                <button onclick="exportMetricsJSON()" style="background: #667eea; padding: 10px 20px; font-size: 13px; border-radius: 6px; width: auto; flex: none;">
+                  Export JSON
                 </button>
               </div>
             </div>
           </div>
+
+          <h3 style="margin-bottom: 16px; color: #333;">📁 Evaluation History</h3>
           <div id="artifactsList" class="artifacts-list"></div>
         </div>
       </div>
@@ -802,7 +836,7 @@
 
     let currentEvaluation = null;
 
-    // Custom Metrics Management
+    // === METRICS CONFIGURATION ===
     const BUILTIN_METRICS = [
       'Answer Relevancy',
       'Faithfulness',
@@ -820,11 +854,164 @@
       custom: new Set()
     };
 
-    function addCustomMetric() {
-      const input = document.getElementById('customMetricInput');
-      const description = input.value.trim();
+    // Initialize metrics UI on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      renderMetricsUI();
+    });
 
-      if (!description) {
+    function renderMetricsUI() {
+      const container = document.getElementById('metricsListContainer');
+      if (!container) return;
+
+      let html = '';
+
+      // Built-in metrics
+      BUILTIN_METRICS.forEach(metric => {
+        const checked = selectedMetrics.builtin.has(metric) ? 'checked' : '';
+        html += `
+          <label style="display:flex;align-items:center;padding:10px;margin-bottom:6px;border-radius:6px;cursor:pointer;background:#f5f5f5;border:1px solid #ddd;transition:0.2s;hover{background:#eee}">
+            <input type="checkbox" ${checked}
+              onchange="toggleBuiltinMetric('${metric}', this.checked)"
+              style="margin-right:10px;cursor:pointer;accent-color:#667eea;width:18px;height:18px;">
+            <span style="font-size:13px;color:#333;user-select:none;flex:1;">✓ ${metric}</span>
+          </label>
+        `;
+      });
+
+      // Custom metrics - same format as built-in
+      customMetrics.forEach(m => {
+        const checked = selectedMetrics.custom.has(m.id) ? 'checked' : '';
+        html += `
+          <label style="display:flex;align-items:center;padding:10px;margin-bottom:6px;border-radius:6px;cursor:pointer;background:#f5f5f5;border:1px solid #ddd;transition:0.2s;" title="${escapeHtml(m.desc)}">
+            <input type="checkbox" ${checked}
+              onchange="toggleCustomMetric('${m.id}', this.checked)"
+              style="margin-right:10px;cursor:pointer;accent-color:#ff9800;width:18px;height:18px;">
+            <span style="font-size:13px;color:#333;user-select:none;">✓ 🎯 ${escapeHtml(m.name)}</span>
+          </label>
+        `;
+      });
+
+      container.innerHTML = html;
+      updateMetricsCount();
+    }
+
+    function toggleBuiltinMetric(metric, checked) {
+      if (checked) {
+        selectedMetrics.builtin.add(metric);
+      } else {
+        selectedMetrics.builtin.delete(metric);
+      }
+      updateMetricsCount();
+    }
+
+    function toggleCustomMetric(id, checked) {
+      if (checked) {
+        selectedMetrics.custom.add(id);
+      } else {
+        selectedMetrics.custom.delete(id);
+      }
+      updateMetricsCount();
+    }
+
+    function updateMetricsCount() {
+      const count = selectedMetrics.builtin.size + selectedMetrics.custom.size;
+      const counter = document.getElementById('metricsCounter');
+      const summary = document.getElementById('readySummary');
+      if (counter) counter.textContent = count;
+      if (summary) summary.textContent = count + ' metric' + (count !== 1 ? 's' : '') + ' selected';
+    }
+
+    function extractMetricName(description) {
+      // AI-based metric name extraction using semantic analysis
+      const desc = description.toLowerCase();
+
+      // Enhanced keyword mapping with multiple variations per category
+      const keywordMaps = {
+        // Simplicity & Language Complexity
+        'simple': 'Simplicity', 'simple language': 'Simplicity', 'english language': 'Plain Language',
+        'complex': 'Complexity', 'terminology': 'Simplicity', 'technical terms': 'Plain Language',
+        'easy': 'Clarity', 'easy to understand': 'Clarity', 'plain language': 'Plain Language',
+
+        // Quantity & Detail
+        'detailed': 'Completeness', 'comprehensive': 'Completeness', 'thorough': 'Completeness',
+        'concise': 'Conciseness', 'brief': 'Conciseness', 'short': 'Conciseness',
+        'lengthy': 'Length', 'long': 'Length', 'words': 'Length',
+        'more': 'Completeness', 'include': 'Completeness', 'cover': 'Coverage',
+
+        // Clarity & Quality
+        'clear': 'Clarity', 'clarity': 'Clarity', 'understandable': 'Clarity',
+        'coherent': 'Coherence', 'logical': 'Logic', 'structured': 'Structure',
+        'organized': 'Organization', 'organize': 'Organization', 'flow': 'Information Flow',
+
+        // Accuracy & Correctness
+        'accurate': 'Accuracy', 'correct': 'Correctness', 'precise': 'Precision', 'exact': 'Accuracy',
+        'appropriate': 'Appropriateness',
+
+        // Professionalism & Tone
+        'professional': 'Professionalism', 'professional tone': 'Professionalism',
+        'formal': 'Formality', 'formal tone': 'Formality', 'casual': 'Casualness',
+        'polite': 'Politeness', 'respectful': 'Respect', 'tone': 'Tone Quality',
+
+        // Technical & Examples
+        'technical': 'Technical Depth', 'example': 'Examples', 'use case': 'Use Cases',
+        'scenario': 'Scenarios', 'instance': 'Examples', 'illustrate': 'Examples',
+
+        // Grammar & Writing Quality
+        'grammar': 'Grammar', 'spelling': 'Spelling', 'punctuation': 'Punctuation',
+        'sentence': 'Sentence Structure', 'paragraph': 'Paragraph Structure',
+        'consistency': 'Consistency', 'consistent': 'Consistency'
+      };
+
+      // Find best matching keyword(s)
+      let bestMatch = null;
+      let matchCount = 0;
+
+      for (const [keyword, name] of Object.entries(keywordMaps)) {
+        const regex = new RegExp('\\b' + keyword + '\\b', 'g');
+        const count = (desc.match(regex) || []).length;
+        if (count > matchCount) {
+          matchCount = count;
+          bestMatch = name;
+        }
+      }
+
+      if (bestMatch) return bestMatch;
+
+      // Advanced fallback: Extract meaningful phrases
+      const patterns = [
+        /should be (\w+(?:\s+\w+)?)/i,
+        /must be (\w+(?:\s+\w+)?)/i,
+        /needs to (\w+(?:\s+\w+)?)/i,
+        /response (\w+(?:\s+\w+)?)/i
+      ];
+
+      for (const pattern of patterns) {
+        const match = description.match(pattern);
+        if (match && match[1]) {
+          const captured = match[1].trim();
+          const words = captured.split(/\s+/).filter(w => w.length > 3);
+          if (words.length > 0) {
+            return words.slice(0, 2).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+          }
+        }
+      }
+
+      // Last resort: Extract first 2-3 meaningful words
+      const words = description.split(/\s+/).filter(w => w.length > 4);
+      let name = '';
+
+      for (let i = 0; i < Math.min(2, words.length); i++) {
+        name += (name ? ' ' : '') + words[i].charAt(0).toUpperCase() + words[i].slice(1).toLowerCase();
+      }
+
+      return name || 'Custom Metric';
+    }
+
+    async function addCustomMetric() {
+      const input = document.getElementById('customMetricInput');
+      const desc = input.value.trim();
+
+      if (!desc) {
         showStatus('Please describe a custom metric', 'error');
         return;
       }
@@ -834,37 +1021,50 @@
         return;
       }
 
-      const metric = {
-        id: 'custom_' + Date.now(),
-        name: description.substring(0, 50) + (description.length > 50 ? '...' : ''),
-        fullDescription: description,
-        timestamp: new Date().toLocaleString()
-      };
+      showStatus('🤖 Extracting metric name...', 'loading');
+      const button = event?.target;
+      if (button) button.disabled = true;
 
-      customMetrics.push(metric);
-      selectedMetrics.custom.add(metric.name);
-      input.value = '';
+      try {
+        const response = await fetch('/api/extract-metric-name', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: desc })
+        });
 
-      updateCustomMetricsList();
-      updateMetricsCheckboxes();
+        if (!response.ok) {
+          throw new Error('Failed to extract name');
+        }
 
-      showStatus(`✅ Custom metric added: "${metric.name}"`, 'success');
+        const data = await response.json();
+        const name = data.metricName || extractMetricName(desc);
+
+        const id = 'custom_' + Date.now();
+        customMetrics.push({ id, name, desc, ts: new Date().toLocaleString() });
+        selectedMetrics.custom.add(id);
+        input.value = '';
+        renderMetricsUI();
+        updateCustomMetricsList();
+        showStatus('✅ Custom metric added: "' + name + '"', 'success');
+      } catch (error) {
+        console.error('Error:', error);
+        showStatus('Failed to extract metric name', 'error');
+      } finally {
+        if (button) button.disabled = false;
+      }
     }
 
     function removeCustomMetric(id) {
-      const metricIndex = customMetrics.findIndex(m => m.id === id);
-      if (metricIndex > -1) {
-        const metric = customMetrics[metricIndex];
-        selectedMetrics.custom.delete(metric.name);
-        customMetrics.splice(metricIndex, 1);
-        updateCustomMetricsList();
-        updateMetricsCheckboxes();
-      }
+      customMetrics = customMetrics.filter(m => m.id !== id);
+      selectedMetrics.custom.delete(id);
+      renderMetricsUI();
+      updateCustomMetricsList();
     }
 
     function updateCustomMetricsList() {
       const list = document.getElementById('customMetricsList');
       const count = document.getElementById('customMetricCount');
+      if (!list || !count) return;
 
       count.textContent = customMetrics.length;
 
@@ -874,186 +1074,327 @@
       }
 
       list.innerHTML = customMetrics.map(metric => `
-        <div style="background: white; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-          <div>
+        <div style="background: white; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-start;">
+          <div style="flex:1;">
             <div style="font-weight: 600; color: #333; margin-bottom: 4px;">🎯 ${escapeHtml(metric.name)}</div>
-            <div style="font-size: 12px; color: #666;">${escapeHtml(metric.fullDescription)}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Added: ${metric.timestamp}</div>
+            <div style="font-size: 12px; color: #666;">${escapeHtml(metric.desc)}</div>
+            <div style="font-size: 11px; color: #999; margin-top: 4px;">Added: ${metric.ts}</div>
           </div>
-          <button onclick="removeCustomMetric('${metric.id}')" style="
-            background: #f44336;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 6px 12px;
-            cursor: pointer;
-            font-size: 12px;
-            white-space: nowrap;
-            margin-left: 12px;
-          ">Remove</button>
+          <button type="button" onclick="removeCustomMetric('${metric.id}'); return false;"
+            style="background: #f44336; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px; white-space: nowrap; margin-left: 12px;">Remove</button>
         </div>
       `).join('');
     }
 
     function proceedToMetricsSelection() {
-      document.getElementById('customMetricsSection').style.display = 'block';
-      updateMetricsCheckboxes();
-      document.getElementById('customMetricInput').scrollIntoView({ behavior: 'smooth' });
+      const section = document.getElementById('customMetricsSection');
+      if (section) {
+        section.style.display = 'block';
+        updateMetricsCheckboxes();
+        section.scrollIntoView({ behavior: 'smooth' });
+      }
     }
 
     function updateMetricsCheckboxes() {
       // Built-in metrics checkboxes
       const builtinContainer = document.getElementById('builtinMetricsCheckboxes');
-      builtinContainer.innerHTML = BUILTIN_METRICS.map(metric => `
-        <label style="display: flex; align-items: center; cursor: pointer; padding: 8px; border-radius: 6px; transition: background 0.2s; background: ${selectedMetrics.builtin.has(metric) ? '#e3f2fd' : '#f5f5f5'};">
-          <input type="checkbox"
-            ${selectedMetrics.builtin.has(metric) ? 'checked' : ''}
-            onchange="toggleMetric('builtin', '${metric}', this.checked)"
-            style="margin-right: 8px; cursor: pointer; width: 18px; height: 18px;"
-          >
-          <span style="font-size: 13px; color: #333;">${metric}</span>
-        </label>
-      `).join('');
-
-      // Custom metrics checkboxes
-      const customContainer = document.getElementById('customMetricsCheckboxes');
-      if (customMetrics.length === 0) {
-        customContainer.innerHTML = '<p style="color: #999; font-size: 13px;">No custom metrics added yet</p>';
-      } else {
-        customContainer.innerHTML = customMetrics.map(metric => `
-          <label style="display: flex; align-items: center; cursor: pointer; padding: 8px; border-radius: 6px; transition: background 0.2s; background: ${selectedMetrics.custom.has(metric.name) ? '#f1f8e9' : '#f5f5f5'};">
+      if (builtinContainer) {
+        builtinContainer.innerHTML = BUILTIN_METRICS.map(metric => `
+          <label style="display: flex; align-items: center; cursor: pointer; padding: 10px; border-radius: 6px; transition: background 0.2s; background: ${selectedMetrics.builtin.has(metric) ? '#e3f2fd' : '#f5f5f5'}; border: 1px solid #ddd;">
             <input type="checkbox"
-              ${selectedMetrics.custom.has(metric.name) ? 'checked' : ''}
-              onchange="toggleMetric('custom', '${metric.name}', this.checked)"
-              style="margin-right: 8px; cursor: pointer; width: 18px; height: 18px;"
+              ${selectedMetrics.builtin.has(metric) ? 'checked' : ''}
+              onchange="toggleBuiltinMetric('${metric}', this.checked)"
+              style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px; accent-color: #667eea;"
             >
-            <span style="font-size: 13px; color: #333;">${escapeHtml(metric.name)}</span>
+            <span style="font-size: 13px; color: #333;">✓ ${metric}</span>
           </label>
         `).join('');
       }
-    }
 
-    function toggleMetric(type, name, isChecked) {
-      if (type === 'builtin') {
-        if (isChecked) {
-          selectedMetrics.builtin.add(name);
+      // Custom metrics checkboxes
+      const customContainer = document.getElementById('customMetricsCheckboxes');
+      if (customContainer) {
+        if (customMetrics.length === 0) {
+          customContainer.innerHTML = '<p style="color: #999; font-size: 13px;">No custom metrics added yet</p>';
         } else {
-          selectedMetrics.builtin.delete(name);
-        }
-      } else {
-        if (isChecked) {
-          selectedMetrics.custom.add(name);
-        } else {
-          selectedMetrics.custom.delete(name);
+          customContainer.innerHTML = customMetrics.map(metric => `
+            <label style="display: flex; align-items: center; cursor: pointer; padding: 10px; border-radius: 6px; transition: background 0.2s; background: ${selectedMetrics.custom.has(metric.id) ? '#fff3e0' : '#f5f5f5'}; border: 1px solid #ddd;" title="${escapeHtml(metric.desc)}">
+              <input type="checkbox"
+                ${selectedMetrics.custom.has(metric.id) ? 'checked' : ''}
+                onchange="toggleCustomMetric('${metric.id}', this.checked)"
+                style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px; accent-color: #ff9800;"
+              >
+              <span style="font-size: 13px; color: #333;">✓ 🎯 ${escapeHtml(metric.name)}</span>
+            </label>
+          `).join('');
         }
       }
+    }
+
+    function getSelectedMetrics() {
+      const selected = { builtin: Array.from(selectedMetrics.builtin), custom: [] };
+      selectedMetrics.custom.forEach(id => {
+        const metric = customMetrics.find(m => m.id === id);
+        if (metric) selected.custom.push(metric);
+      });
+      return selected;
     }
 
     function generatePDFReport() {
-      if (selectedMetrics.builtin.size === 0 && selectedMetrics.custom.size === 0) {
-        showStatus('Please select at least one metric', 'error');
+      // Wait for html2pdf to load if needed
+      if (typeof html2pdf === 'undefined') {
+        showStatus('⏳ Loading PDF library...', 'loading');
+        let attempts = 0;
+        const checkLib = setInterval(() => {
+          attempts++;
+          if (typeof html2pdf !== 'undefined' && html2pdf) {
+            clearInterval(checkLib);
+            showStatus('', '');
+            generatePDFReportInternal();
+            return;
+          }
+          if (attempts >= 10) {
+            clearInterval(checkLib);
+            showStatus('❌ PDF library failed to load. Try refreshing the page.', 'error');
+            return;
+          }
+        }, 300);
         return;
       }
 
-      const element = document.createElement('div');
-      element.style.padding = '40px';
-      element.style.fontFamily = 'Arial, sans-serif';
-      element.style.lineHeight = '1.6';
-      element.style.color = '#333';
+      generatePDFReportInternal();
+    }
 
-      const timestamp = new Date().toLocaleString();
-      const totalMetrics = selectedMetrics.builtin.size + selectedMetrics.custom.size;
+    function generatePDFReportInternal() {
+      const ev = currentEvaluation;
+        const metrics = ev ? ev.metrics : null;
+        const qualityMetrics = metrics ? (metrics.qualityMetrics || {}) : {};
+        const timestamp = new Date().toLocaleString();
+        const evalTimestamp = metrics ? new Date(metrics.timestamp).toLocaleString() : 'N/A';
+
+      const metricLabelsMap = {
+        'answer_relevancy': 'Answer Relevancy', 'faithfulness': 'Faithfulness',
+        'contextual_precision': 'Contextual Precision', 'contextual_recall': 'Contextual Recall',
+        'contextual_relevancy': 'Contextual Relevancy', 'hallucination': 'Hallucination',
+        'toxicity': 'Toxicity', 'summarization': 'Summarization',
+        'response_length': 'Response Length', 'completeness': 'Completeness', 'clarity': 'Clarity'
+      };
+
+      // Build metric rows for the report
+      const builtinRows = Object.entries(qualityMetrics)
+        .filter(([k]) => !k.startsWith('custom_'))
+        .map(([k, d]) => {
+          const label = metricLabelsMap[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const pct = Math.round(d.avg * 100);
+          const passed = d.passed;
+          const bar = `<div style="background:#e0e0e0;border-radius:4px;height:8px;width:100%;margin:4px 0;"><div style="background:${passed?'#4caf50':'#f44336'};height:8px;border-radius:4px;width:${pct}%;"></div></div>`;
+          return `<tr style="border-bottom:1px solid #f0f0f0;">
+            <td style="padding:10px 12px;font-weight:600;color:#333;">${label}</td>
+            <td style="padding:10px 12px;text-align:center;font-size:18px;font-weight:700;color:${passed?'#2e7d32':'#c62828'};">${pct}%</td>
+            <td style="padding:10px 12px;text-align:center;">
+              <span style="background:${passed?'#e8f5e9':'#ffebee'};color:${passed?'#2e7d32':'#c62828'};padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">${passed?'PASS':'FAIL'}</span>
+            </td>
+            <td style="padding:10px 12px;width:180px;">${bar}<span style="font-size:11px;color:#999;">Threshold: ≥75%</span></td>
+          </tr>`;
+        }).join('');
+
+      const customRows = Object.entries(qualityMetrics)
+        .filter(([k]) => k.startsWith('custom_'))
+        .map(([k, d]) => {
+          const metricId = k.replace('custom_', '');
+          const cm = customMetrics.find(m => m.id === metricId);
+          const label = cm ? cm.name : k;
+          const desc = cm ? cm.desc : '';
+          const pct = Math.round(d.avg * 100);
+          const passed = d.passed;
+          const bar = `<div style="background:#e0e0e0;border-radius:4px;height:8px;width:100%;margin:4px 0;"><div style="background:${passed?'#4caf50':'#f44336'};height:8px;border-radius:4px;width:${pct}%;"></div></div>`;
+          return `<tr style="border-bottom:1px solid #f0f0f0;">
+            <td style="padding:10px 12px;">
+              <div style="font-weight:600;color:#e65100;">🎯 ${escapeHtml(label)}</div>
+              <div style="font-size:11px;color:#999;margin-top:2px;">${escapeHtml(desc)}</div>
+            </td>
+            <td style="padding:10px 12px;text-align:center;font-size:18px;font-weight:700;color:${passed?'#2e7d32':'#c62828'};">${pct}%</td>
+            <td style="padding:10px 12px;text-align:center;">
+              <span style="background:${passed?'#e8f5e9':'#ffebee'};color:${passed?'#2e7d32':'#c62828'};padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">${passed?'PASS':'FAIL'}</span>
+            </td>
+            <td style="padding:10px 12px;width:180px;">${bar}<span style="font-size:11px;color:#999;">Threshold: ≥75%</span></td>
+          </tr>`;
+        }).join('');
+
+      // Conversation log
+      const prompts = metrics ? metrics.prompts || [] : [];
+      const responses = metrics ? metrics.responses || [] : [];
+      const convRows = prompts.map((p, i) => `
+        <div style="margin-bottom:20px;page-break-inside:avoid;">
+          <div style="margin-bottom:8px;">
+            <div style="display:inline-block;background:#667eea;color:white;font-size:11px;font-weight:700;padding:2px 10px;border-radius:10px;margin-bottom:6px;">USER PROMPT ${i+1}</div>
+            <div style="background:#f5f7ff;border-left:3px solid #667eea;padding:10px 14px;border-radius:0 6px 6px 0;font-size:13px;color:#333;">${escapeHtml(p)}</div>
+          </div>
+          <div>
+            <div style="display:inline-block;background:#4caf50;color:white;font-size:11px;font-weight:700;padding:2px 10px;border-radius:10px;margin-bottom:6px;">ASSISTANT RESPONSE</div>
+            <div style="background:#f5faf5;border-left:3px solid #4caf50;padding:10px 14px;border-radius:0 6px 6px 0;font-size:13px;color:#333;">${escapeHtml(responses[i] || '')}</div>
+          </div>
+        </div>
+      `).join('');
+
+      const overallPassRate = metrics ? Math.round((metrics.overallPassRate || 0) * 100) : 0;
+      const metricsPassed = metrics ? (metrics.metricsPassed || 0) : 0;
+      const metricsTotal = metrics ? (metrics.metricsTotal || 0) : 0;
+      const overallPass = metrics ? metrics.overallPass : false;
+
+      const element = document.createElement('div');
+      element.style.cssText = 'padding:0;font-family:Arial,Helvetica,sans-serif;line-height:1.6;color:#333;background:white;';
 
       element.innerHTML = `
-        <div style="text-align: center; margin-bottom: 40px; border-bottom: 3px solid #667eea; padding-bottom: 20px;">
-          <h1 style="color: #667eea; margin: 0; font-size: 32px;">DeepEval Report</h1>
-          <h2 style="color: #666; margin: 10px 0 0 0; font-size: 16px; font-weight: normal;">Custom Metrics Analysis</h2>
+        <!-- COVER PAGE -->
+        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:60px 48px;color:white;min-height:220px;">
+          <div style="font-size:13px;letter-spacing:2px;text-transform:uppercase;opacity:0.8;margin-bottom:12px;">SimChat · DeepEval Framework v1.1.0</div>
+          <h1 style="font-size:36px;font-weight:700;margin:0 0 8px 0;letter-spacing:-0.5px;">AI Chatbot Evaluation Report</h1>
+          <p style="font-size:16px;margin:0;opacity:0.85;">Comprehensive Quality Metrics Analysis</p>
+          <div style="margin-top:36px;display:flex;gap:40px;">
+            <div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;">Generated</div><div style="font-size:14px;font-weight:600;">${timestamp}</div></div>
+            <div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;">Evaluation Run</div><div style="font-size:14px;font-weight:600;">${evalTimestamp}</div></div>
+            ${metrics ? `<div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;">Mode</div><div style="font-size:14px;font-weight:600;">${metrics.evaluationMode === 'dynamic' ? 'Dynamic' : 'Static'}</div></div>` : ''}
+          </div>
         </div>
 
-        <div style="margin-bottom: 30px;">
-          <h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📋 Report Summary</h3>
-          <table style="width: 100%; margin-top: 15px; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold; width: 30%;">Generated Date</td>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${timestamp}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Total Metrics Selected</td>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${totalMetrics}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Built-in Metrics</td>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${selectedMetrics.builtin.size}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Custom Metrics</td>
-              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${selectedMetrics.custom.size}</td>
-            </tr>
-          </table>
-        </div>
+        <div style="padding:40px 48px;">
 
-        ${selectedMetrics.builtin.size > 0 ? `
-          <div style="margin-bottom: 30px; page-break-inside: avoid;">
-            <h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📊 Built-in Metrics</h3>
-            <ol style="margin-top: 15px; padding-left: 20px;">
-              ${Array.from(selectedMetrics.builtin).map((metric, i) => `
-                <li style="margin-bottom: 12px; line-height: 1.5;">
-                  <strong>${metric}</strong>
-                  <br/>
-                  <span style="color: #666; font-size: 13px;">Standard DeepEval metric for comprehensive chatbot evaluation</span>
-                </li>
-              `).join('')}
-            </ol>
+          <!-- EXECUTIVE SUMMARY -->
+          <div style="margin-bottom:40px;">
+            <h2 style="font-size:20px;color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;margin-bottom:20px;">Executive Summary</h2>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;">
+              <div style="background:${overallPass?'#e8f5e9':'#fff3e0'};border:1px solid ${overallPass?'#c8e6c9':'#ffe0b2'};border-radius:10px;padding:18px;text-align:center;">
+                <div style="font-size:30px;font-weight:700;color:${overallPass?'#2e7d32':'#e65100'};">${overallPassRate}%</div>
+                <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:4px;">Overall Score</div>
+              </div>
+              <div style="background:#f3f4ff;border:1px solid #c5cae9;border-radius:10px;padding:18px;text-align:center;">
+                <div style="font-size:30px;font-weight:700;color:#3949ab;">${metricsPassed}/${metricsTotal}</div>
+                <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:4px;">Metrics Passed</div>
+              </div>
+              <div style="background:#f3f4ff;border:1px solid #c5cae9;border-radius:10px;padding:18px;text-align:center;">
+                <div style="font-size:30px;font-weight:700;color:#3949ab;">${prompts.length}</div>
+                <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:4px;">Test Prompts</div>
+              </div>
+              <div style="background:#f3f4ff;border:1px solid #c5cae9;border-radius:10px;padding:18px;text-align:center;">
+                <div style="font-size:30px;font-weight:700;color:#3949ab;">${metrics ? metrics.averageResponseTime + 'ms' : 'N/A'}</div>
+                <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:4px;">Avg Response Time</div>
+              </div>
+            </div>
+            <div style="background:${overallPass?'#e8f5e9':'#fff3e0'};border-left:4px solid ${overallPass?'#4caf50':'#ff9800'};padding:14px 18px;border-radius:0 8px 8px 0;">
+              <strong style="color:${overallPass?'#2e7d32':'#e65100'};">${overallPass?'✅ OVERALL PASS':'⚠️ SOME METRICS BELOW THRESHOLD'}</strong>
+              <span style="color:#555;font-size:13px;margin-left:8px;">${metricsPassed} of ${metricsTotal} metrics passed the 75% quality threshold.</span>
+            </div>
           </div>
-        ` : ''}
 
-        ${selectedMetrics.custom.size > 0 ? `
-          <div style="margin-bottom: 30px; page-break-inside: avoid;">
-            <h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px;">🎯 Custom Metrics</h3>
-            <ol style="margin-top: 15px; padding-left: 20px;">
-              ${customMetrics.filter(m => selectedMetrics.custom.has(m.name)).map((metric, i) => `
-                <li style="margin-bottom: 16px; line-height: 1.5;">
-                  <strong>${escapeHtml(metric.name)}</strong>
-                  <br/>
-                  <span style="color: #666;">Description: ${escapeHtml(metric.fullDescription)}</span>
-                  <br/>
-                  <span style="color: #999; font-size: 12px;">Added: ${metric.timestamp}</span>
-                </li>
-              `).join('')}
-            </ol>
+          <!-- EVALUATION CONFIGURATION -->
+          ${metrics ? `
+          <div style="margin-bottom:40px;page-break-inside:avoid;">
+            <h2 style="font-size:20px;color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;margin-bottom:20px;">Evaluation Configuration</h2>
+            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+              <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;width:35%;border:1px solid #e0e0e0;">API Endpoint</td><td style="padding:10px 14px;border:1px solid #e0e0e0;word-break:break-all;">${escapeHtml(metrics.apiEndpoint || 'N/A')}</td></tr>
+              <tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Evaluation Mode</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${metrics.evaluationMode === 'dynamic' ? '🤖 Dynamic (AI-Generated Conversations)' : '📝 Static (Predefined Prompts)'}</td></tr>
+              <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Pass Threshold</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">75% (uniform across all metrics)</td></tr>
+              <tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Total Messages</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${metrics.totalMessages}</td></tr>
+              <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Custom Metrics</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${customMetrics.length > 0 ? customMetrics.map(m => m.name).join(', ') : 'None'}</td></tr>
+            </table>
           </div>
-        ` : ''}
+          ` : ''}
 
-        <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #e0e0e0; color: #999; font-size: 12px; text-align: center;">
-          <p style="margin: 5px 0;">DeepEval Framework v1.1.0</p>
-          <p style="margin: 5px 0;">© 2026 SimChat. All rights reserved.</p>
-          <p style="margin: 5px 0;">This report is confidential and for authorized use only.</p>
+          <!-- BUILT-IN METRIC RESULTS -->
+          ${builtinRows ? `
+          <div style="margin-bottom:40px;">
+            <h2 style="font-size:20px;color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;margin-bottom:20px;">📊 Built-in Metric Results</h2>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <thead>
+                <tr style="background:#667eea;color:white;">
+                  <th style="padding:10px 12px;text-align:left;font-weight:600;">Metric</th>
+                  <th style="padding:10px 12px;text-align:center;font-weight:600;width:80px;">Score</th>
+                  <th style="padding:10px 12px;text-align:center;font-weight:600;width:80px;">Result</th>
+                  <th style="padding:10px 12px;text-align:left;font-weight:600;">Performance</th>
+                </tr>
+              </thead>
+              <tbody>${builtinRows}</tbody>
+            </table>
+          </div>
+          ` : ''}
+
+          <!-- CUSTOM METRIC RESULTS -->
+          ${customRows ? `
+          <div style="margin-bottom:40px;page-break-before:auto;">
+            <h2 style="font-size:20px;color:#333;border-bottom:2px solid #ff9800;padding-bottom:10px;margin-bottom:20px;">🎯 Custom Metric Results</h2>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <thead>
+                <tr style="background:#e65100;color:white;">
+                  <th style="padding:10px 12px;text-align:left;font-weight:600;">Metric &amp; Description</th>
+                  <th style="padding:10px 12px;text-align:center;font-weight:600;width:80px;">Score</th>
+                  <th style="padding:10px 12px;text-align:center;font-weight:600;width:80px;">Result</th>
+                  <th style="padding:10px 12px;text-align:left;font-weight:600;">Performance</th>
+                </tr>
+              </thead>
+              <tbody>${customRows}</tbody>
+            </table>
+          </div>
+          ` : ''}
+
+          <!-- CONVERSATION LOG -->
+          ${convRows ? `
+          <div style="margin-bottom:40px;page-break-before:always;">
+            <h2 style="font-size:20px;color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;margin-bottom:20px;">💬 Conversation Log</h2>
+            ${convRows}
+          </div>
+          ` : ''}
+
+          <!-- FOOTER -->
+          <div style="margin-top:48px;padding-top:20px;border-top:2px solid #e0e0e0;text-align:center;color:#aaa;font-size:11px;">
+            <p style="margin:4px 0;font-weight:600;color:#999;">DeepEval Framework v1.1.0 · SimChat AI Evaluation Platform</p>
+            <p style="margin:4px 0;">© 2026 SimForm Solutions. All rights reserved. This report is confidential and intended for authorized use only.</p>
+            <p style="margin:4px 0;">Report generated: ${timestamp}</p>
+          </div>
+
         </div>
       `;
 
       const opt = {
-        margin: 10,
-        filename: `deepeval-metrics-report-${Date.now()}.pdf`,
+        margin: [0, 0, 0, 0],
+        filename: `deepeval-report-${new Date().toISOString().slice(0,10)}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       };
 
-      html2pdf().set(opt).from(element).save();
-      showStatus('✅ PDF report downloaded successfully!', 'success');
+      showStatus('⏳ Generating PDF report...', 'loading');
+
+      try {
+        const worker = html2pdf().set(opt).from(element);
+
+        worker.save().then(() => {
+          showStatus('✅ PDF report downloaded successfully!', 'success');
+          setTimeout(() => {
+            showStatus('', '');
+          }, 3000);
+        }).catch((error) => {
+          console.error('PDF generation error:', error);
+          showStatus('❌ Failed to generate PDF. Try refreshing and try again.', 'error');
+        });
+      } catch (error) {
+        console.error('PDF error:', error);
+        showStatus('❌ Error: ' + (error.message || 'PDF generation failed'), 'error');
+      }
     }
 
     function exportMetricsJSON() {
+      const selectedData = getSelectedMetrics();
       const report = {
         timestamp: new Date().toISOString(),
         summary: {
-          totalMetrics: selectedMetrics.builtin.size + selectedMetrics.custom.size,
-          builtinMetrics: selectedMetrics.builtin.size,
-          customMetrics: selectedMetrics.custom.size
+          totalMetrics: selectedData.builtin.length + selectedData.custom.length,
+          builtinMetrics: selectedData.builtin.length,
+          customMetrics: selectedData.custom.length
         },
         metrics: {
-          builtin: Array.from(selectedMetrics.builtin),
-          custom: customMetrics.filter(m => selectedMetrics.custom.has(m.name))
+          builtin: selectedData.builtin,
+          custom: selectedData.custom
         },
         evaluation: currentEvaluation ? {
           apiEndpoint: currentEvaluation.metrics?.apiEndpoint,
@@ -1138,12 +1479,19 @@
       updateProgress(0, 'Initializing evaluation...');
 
       try {
+        // Get selected metrics
+        const selectedMetricsData = getSelectedMetrics();
+
         const payload = {
           apiEndpoint,
           evaluationCriteria: {
             systemPrompt: systemPrompt || null,
           },
           evaluationMode,
+          selectedMetrics: {
+            builtin: selectedMetricsData.builtin,
+            custom: selectedMetricsData.custom
+          }
         };
 
         if (evaluationMode === 'dynamic') {
@@ -1430,8 +1778,14 @@
       };
 
       let html = '';
+
+      // Show only selected built-in metrics
       for (const [key, data] of Object.entries(qualityMetrics)) {
         const label = metricLabels[key] || key.replace(/_/g, ' ');
+
+        // Check if this metric is in the selected list
+        if (!selectedMetrics.builtin.has(label)) continue;
+
         const avg = data.avg;
         const threshold = data.threshold ?? PASS_THRESHOLD;
         const passed = data.passed ?? (avg >= threshold);
@@ -1451,6 +1805,44 @@
           </div>
         `;
       }
+
+      // Show selected custom metrics with scores
+      customMetrics.forEach(metric => {
+        if (selectedMetrics.custom.has(metric.id)) {
+          const metricKey = `custom_${metric.id}`;
+          const customData = qualityMetrics[metricKey];
+
+          if (customData) {
+            const avg = customData.avg;
+            const threshold = customData.threshold ?? PASS_THRESHOLD;
+            const passed = customData.passed ?? (avg >= threshold);
+            const className = passed ? 'good' : 'poor';
+            const status = passed ? `✅ Pass (≥${(threshold * 100).toFixed(0)}%)` : `❌ Fail (<${(threshold * 100).toFixed(0)}%)`;
+
+            html += `
+              <div class="quality-metric-badge ${className}" style="border-color: #ff9800;">
+                <div class="quality-metric-name">🎯 ${escapeHtml(metric.name)}</div>
+                <div class="quality-metric-value" style="color: #ff9800;">${(avg * 100).toFixed(0)}%</div>
+                <div class="quality-metric-bar">
+                  <div class="quality-metric-bar-fill" style="width: ${avg * 100}%; background: ${passed ? '#4caf50' : '#f44336'};"></div>
+                </div>
+                <div class="quality-metric-status">${status}</div>
+              </div>
+            `;
+          } else {
+            // Placeholder if metric not evaluated yet
+            html += `
+              <div class="quality-metric-badge" style="border-color: #ff9800; background: #fff3e0;">
+                <div class="quality-metric-name" style="color: #e65100;">🎯 ${escapeHtml(metric.name)}</div>
+                <div class="quality-metric-value" style="color: #ff9800; font-size: 16px;">-</div>
+                <div style="font-size: 11px; color: #666; margin: 6px 0; line-height: 1.3;">${escapeHtml(metric.desc)}</div>
+                <div class="quality-metric-status" style="color: #e65100;">Evaluating...</div>
+              </div>
+            `;
+          }
+        }
+      });
+
       grid.innerHTML = html;
 
       // Create quality metrics charts
@@ -1486,10 +1878,33 @@
       chartsGrid.appendChild(scoresChart);
 
       setTimeout(() => {
-        const metricNames = Object.keys(qualityMetrics).map(k =>
-          k.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-        );
-        const metricAvgs = Object.values(qualityMetrics).map(d => d.avg);
+        const metricLabelsMap = {
+          'answer_relevancy': 'Answer Relevancy', 'faithfulness': 'Faithfulness',
+          'contextual_precision': 'Contextual Precision', 'contextual_recall': 'Contextual Recall',
+          'contextual_relevancy': 'Contextual Relevancy', 'hallucination': 'Hallucination',
+          'toxicity': 'Toxicity', 'summarization': 'Summarization',
+          'response_length': 'Response Length', 'completeness': 'Completeness', 'clarity': 'Clarity'
+        };
+
+        // Filter to only selected metrics for charts
+        const filteredEntries = Object.entries(qualityMetrics).filter(([k]) => {
+          if (k.startsWith('custom_')) {
+            const metricId = k.replace('custom_', '');
+            return selectedMetrics.custom.has(metricId);
+          }
+          const label = metricLabelsMap[k] || k.replace(/_/g, ' ');
+          return selectedMetrics.builtin.has(label);
+        });
+
+        const metricNames = filteredEntries.map(([k]) => {
+          if (k.startsWith('custom_')) {
+            const metricId = k.replace('custom_', '');
+            const customMetric = customMetrics.find(m => m.id === metricId);
+            return customMetric ? `🎯 ${customMetric.name}` : k;
+          }
+          return metricLabelsMap[k] || k.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        });
+        const metricAvgs = filteredEntries.map(([, d]) => d.avg);
 
         // Radar Chart
         const ctx1 = document.getElementById('qualityRadarChart');

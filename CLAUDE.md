@@ -8,6 +8,31 @@
 
 ---
 
+## ⭐ CRITICAL RULE: Local Development Only
+
+**FROM OCTOBER 1, 2026 ONWARDS:**
+
+🚫 **DO NOT commit or push ANY code to GitHub**  
+✅ **ONLY make local changes to files**  
+✅ **Test locally before any changes**  
+✅ **Never use `git commit` or `git push`**
+
+**Why:** User prefers local development iteration without remote changes. This allows for:
+- Safe experimentation without affecting remote repo
+- Time to review changes locally before pushing
+- Control over when/if changes go to production
+
+**What this means:**
+- Make all code edits locally in the working directory
+- Test changes thoroughly
+- Document what was changed
+- Wait for explicit user approval before any git operations
+- If user wants to push later, they will request it explicitly
+
+**Exception:** Only proceed with commits/pushes if the user explicitly says "go ahead and commit" or "push this to GitHub"
+
+---
+
 ## Critical Design Principle: Session Isolation
 
 **CORE PRINCIPLE:** Never evaluate a response using the same LLM session that generated it.

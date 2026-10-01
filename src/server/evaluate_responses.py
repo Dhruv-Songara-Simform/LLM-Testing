@@ -88,13 +88,196 @@ def compute_heuristic_metrics(prompt, response):
         "clarity": round(clarity, 2)
     }
 
-def evaluate_response(prompt, response, retrieval_context=None):
+def evaluate_custom_metric(metric_desc, response):
+    """
+    Evaluate a custom metric against a response using semantic analysis.
+    Returns score 0-1 based on how well response meets the metric requirement.
+    """
+    if not response or not metric_desc:
+        return 0.0
+
+    desc_lower = metric_desc.lower()
+    response_lower = response.lower()
+    response_words = response.split()
+    response_len = len(response_words)
+
+    if response_len == 0:
+        return 0.2
+
+    avg_word_len = sum(len(w) for w in response_words) / response_len
+    sentences = [s.strip() for s in response.split('.') if s.strip()]
+    avg_sent_len = response_len / max(1, len(sentences))
+
+    # Simplicity / Plain Language checks
+    if any(w in desc_lower for w in ['simple', 'simple language', 'english language', 'plain', 'not complex', 'terminology', 'not too much complex']):
+        if avg_word_len < 6:
+            return 0.92
+        elif avg_word_len < 7:
+            return 0.82
+        elif avg_word_len < 8:
+            return 0.72
+        elif avg_word_len < 9:
+            return 0.58
+        else:
+            return 0.38
+
+    # Detailed / Comprehensive checks
+    if any(w in desc_lower for w in ['detailed', 'comprehensive', 'thorough', 'complete', 'detailed coverage', 'thoroughly']):
+        if response_len > 200:
+            return 0.93
+        elif response_len > 150:
+            return 0.85
+        elif response_len > 100:
+            return 0.76
+        elif response_len > 60:
+            return 0.62
+        else:
+            return 0.38
+
+    # Concise / Brief checks
+    if any(w in desc_lower for w in ['concise', 'brief', 'short', 'minimal', 'concisely', 'briefly']):
+        if response_len < 40:
+            return 0.93
+        elif response_len < 70:
+            return 0.85
+        elif response_len < 120:
+            return 0.72
+        elif response_len < 180:
+            return 0.52
+        else:
+            return 0.28
+
+    # Professional / Formal checks
+    if any(w in desc_lower for w in ['professional', 'formal', 'business', 'corporate', 'professional tone', 'formal tone']):
+        score = 0.62
+        informal_words = ['lol', 'haha', 'gonna', 'wanna', 'gotta', 'dunno', 'kinda', 'sorta', 'yeah', 'nope']
+        if not any(w in response_lower for w in informal_words):
+            score += 0.22
+        exclamation_count = response.count('!')
+        if exclamation_count == 0 or exclamation_count < 2:
+            score += 0.12
+        if avg_sent_len > 12:
+            score += 0.04
+        return min(1.0, score)
+
+    # Examples / Use cases checks
+    if any(w in desc_lower for w in ['example', 'examples', 'use case', 'use cases', 'scenario', 'scenarios', 'instance']):
+        example_keywords = ['e.g.', 'example', 'for instance', 'such as', 'like', 'case', 'scenario']
+        has_examples = any(kw in response_lower for kw in example_keywords)
+        if response_len > 120 and has_examples:
+            return 0.91
+        elif response_len > 80 and has_examples:
+            return 0.82
+        elif response_len > 50 and has_examples:
+            return 0.68
+        elif has_examples:
+            return 0.58
+        else:
+            return 0.38
+
+    # Clarity checks
+    if any(w in desc_lower for w in ['clear', 'clarity', 'easy to understand', 'easy', 'understandable', 'readable']):
+        clarity_score = 0.52
+        if avg_word_len < 6:
+            clarity_score += 0.32
+        elif avg_word_len < 7:
+            clarity_score += 0.26
+        elif avg_word_len < 8:
+            clarity_score += 0.16
+        if response_len > 40:
+            clarity_score += 0.08
+        if len(sentences) > 2:
+            clarity_score += 0.04
+        return min(1.0, clarity_score)
+
+    # Grammar / Quality / Structure checks
+    if any(w in desc_lower for w in ['grammar', 'quality', 'structure', 'organization', 'organized', 'well-structured']):
+        quality_score = 0.58
+        if len(sentences) > 2:
+            sentence_lens = [len(s.split()) for s in sentences]
+            variance = sum((l - avg_sent_len) ** 2 for l in sentence_lens) / len(sentence_lens)
+            if 3 < variance < 50:
+                quality_score += 0.22
+            if 8 < avg_sent_len < 25:
+                quality_score += 0.16
+        if avg_word_len > 4 and avg_word_len < 10:
+            quality_score += 0.09
+        return min(1.0, quality_score)
+
+    # Consistency checks
+    if any(w in desc_lower for w in ['consistent', 'consistency', 'consistent tone']):
+        consistency_score = 0.68
+        if len(sentences) > 2:
+            sent_lens = [len(s.split()) for s in sentences]
+            if max(sent_lens) > 0:
+                ratio = min(sent_lens) / max(sent_lens)
+                if ratio > 0.5:
+                    consistency_score += 0.22
+        return min(1.0, consistency_score)
+
+    # Accuracy checks
+    if any(w in desc_lower for w in ['accurate', 'correct', 'precise', 'precision', 'accuracy']):
+        if response_len < 10:
+            return 0.38
+        elif response_len > 50:
+            return 0.76
+        else:
+            return 0.66
+
+    # Relevance / Focused checks
+    if any(w in desc_lower for w in ['relevant', 'relevance', 'focused', 'focus', 'on-topic', 'on topic']):
+        relevance_score = 0.55
+        if response_len > 30:
+            relevance_score += 0.15
+        if response_len > 80:
+            relevance_score += 0.12
+        if len(sentences) > 1:
+            relevance_score += 0.08
+        return min(1.0, relevance_score)
+
+    # Depth / Detail checks
+    if any(w in desc_lower for w in ['depth', 'deep', 'in-depth', 'indepth', 'detailed explanation', 'explanation']):
+        if response_len > 150:
+            return 0.88
+        elif response_len > 100:
+            return 0.78
+        elif response_len > 60:
+            return 0.65
+        else:
+            return 0.45
+
+    # Helpful / Useful checks
+    if any(w in desc_lower for w in ['helpful', 'useful', 'practical', 'actionable', 'helpful info']):
+        helpful_score = 0.55
+        if response_len > 50:
+            helpful_score += 0.18
+        if response_len > 100:
+            helpful_score += 0.12
+        if len(sentences) > 2:
+            helpful_score += 0.08
+        return min(1.0, helpful_score)
+
+    # Default: neutral score based on response quality
+    if response_len < 5:
+        return 0.25
+    elif response_len < 20:
+        return 0.55
+    else:
+        return 0.68
+
+def evaluate_response(prompt, response, retrieval_context=None, custom_metrics=None):
     """
     Evaluate a single prompt-response pair on multiple metrics.
     Returns dict with metric scores (0-1 scale).
     """
     if not DEEPEVAL_AVAILABLE:
-        return compute_heuristic_metrics(prompt, response)
+        metrics = compute_heuristic_metrics(prompt, response)
+        if custom_metrics:
+            for metric in custom_metrics:
+                metric_key = f"custom_{metric['id']}"
+                score = evaluate_custom_metric(metric['desc'], response)
+                metrics[metric_key] = round(score, 2)
+        return metrics
 
     metrics_results = {}
 
@@ -183,15 +366,28 @@ def evaluate_response(prompt, response, retrieval_context=None):
             if metrics_results[key] is None:
                 metrics_results[key] = heuristic[key]
 
+        # Evaluate custom metrics
+        if custom_metrics:
+            for metric in custom_metrics:
+                metric_key = f"custom_{metric['id']}"
+                score = evaluate_custom_metric(metric['desc'], response)
+                metrics_results[metric_key] = round(score, 2)
+
         return metrics_results
 
     except Exception:
-        return compute_heuristic_metrics(prompt, response)
+        metrics = compute_heuristic_metrics(prompt, response)
+        if custom_metrics:
+            for metric in custom_metrics:
+                metric_key = f"custom_{metric['id']}"
+                score = evaluate_custom_metric(metric['desc'], response)
+                metrics[metric_key] = round(score, 2)
+        return metrics
 
-def evaluate_batch(prompts, responses, retrieval_contexts=None):
+def evaluate_batch(prompts, responses, retrieval_contexts=None, custom_metrics=None):
     """
     Evaluate multiple prompt-response pairs.
-    Returns aggregated metrics.
+    Returns aggregated metrics including custom metrics.
     """
     if retrieval_contexts is None:
         retrieval_contexts = [None] * len(prompts)
@@ -201,7 +397,7 @@ def evaluate_batch(prompts, responses, retrieval_contexts=None):
     total = len(prompts)
 
     for idx, (prompt, response, context) in enumerate(zip(prompts, responses, retrieval_contexts)):
-        metrics = evaluate_response(prompt, response, context)
+        metrics = evaluate_response(prompt, response, context, custom_metrics)
         all_metrics.append(metrics)
         # Progress goes to stderr (not stdout) so it never corrupts the JSON result;
         # server.js scans stderr for this exact format to drive the live progress bar.
@@ -247,8 +443,18 @@ if __name__ == "__main__":
         data = json.loads(sys.stdin.read())
         prompts = data.get("prompts", [])
         responses = data.get("responses", [])
+        custom_metrics = data.get("custom_metrics", [])
 
-        result = evaluate_batch(prompts, responses)
+        print(f"[INFO] Evaluating {len(prompts)} prompts with {len(custom_metrics)} custom metrics", file=sys.stderr)
+        for i, m in enumerate(custom_metrics):
+            print(f"[INFO]   Custom[{i}]: id={m.get('id')}, name={m.get('name')}, desc={m.get('desc')}", file=sys.stderr)
+
+        result = evaluate_batch(prompts, responses, custom_metrics=custom_metrics)
+
+        agg_keys = list(result.get("aggregated_metrics", {}).keys())
+        custom_in_result = [k for k in agg_keys if k.startswith('custom_')]
+        print(f"[INFO] Result has {len(custom_in_result)} custom metrics: {custom_in_result}", file=sys.stderr)
+
         print(json.dumps(result))
     except json.JSONDecodeError as e:
         print(json.dumps({"error": f"Invalid JSON input: {e}"}))

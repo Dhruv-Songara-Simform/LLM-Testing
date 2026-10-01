@@ -32,7 +32,7 @@ if (!existsSync(ARTIFACTS_DIR)) {
   mkdirSync(ARTIFACTS_DIR, { recursive: true });
 }
 
-function runPythonEvaluation(prompts, responses, onProgress) {
+function runPythonEvaluation(prompts, responses, onProgress, customMetrics = []) {
   return new Promise((resolve, reject) => {
     const python = spawn('python3', [join(__dirname, 'evaluate_responses.py')]);
     let stdout = '';
@@ -80,7 +80,7 @@ function runPythonEvaluation(prompts, responses, onProgress) {
       resolve({ error: 'Python evaluation not available', metrics: {} });
     });
 
-    python.stdin.write(JSON.stringify({ prompts, responses }));
+    python.stdin.write(JSON.stringify({ prompts, responses, custom_metrics: customMetrics }));
     python.stdin.end();
   });
 }
@@ -169,8 +169,40 @@ app.post('/api/generate-question', async (req, res) => {
   }
 });
 
+app.post('/api/extract-metric-name', async (req, res) => {
+  try {
+    const { description } = req.body;
+
+    if (!description) {
+      return res.status(400).json({ error: 'Description is required' });
+    }
+
+    const response = await client.post('/chat/completions', {
+      model: MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a metric naming expert. Extract a concise 1-2 word metric name from the given description. Return ONLY the metric name in the style of DeepEval metrics (e.g., "Clarity", "Completeness", "Specificity", "Relevancy", "Accuracy"). Capitalize first letter. Return ONLY the name, nothing else.'
+        },
+        {
+          role: 'user',
+          content: `Extract a metric name from this description: "${description}"`
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 15,
+    });
+
+    const metricName = response.data.choices[0]?.message?.content?.trim() || 'Custom Metric';
+    res.json({ metricName });
+  } catch (error) {
+    console.error('Error extracting metric name:', error.message);
+    res.status(500).json({ error: 'Failed to extract metric name' });
+  }
+});
+
 app.post('/api/deepeval', async (req, res) => {
-  const { apiEndpoint, testPrompts = [], evaluationMode = 'static', initialPrompt, numberOfTests = 5, evaluationCriteria = {} } = req.body;
+  const { apiEndpoint, testPrompts = [], evaluationMode = 'static', initialPrompt, numberOfTests = 5, evaluationCriteria = {}, selectedMetrics = {} } = req.body;
 
   if (!apiEndpoint) {
     return res.status(400).json({ error: 'API endpoint is required' });
@@ -276,14 +308,23 @@ app.post('/api/deepeval', async (req, res) => {
     console.log('Computing quality metrics...');
     sendEvent('progress', { percent: 65, message: 'Running quality metrics evaluation (14+ metrics per response)...' });
 
+    const customMetricsList = selectedMetrics.custom || [];
+    console.log('🔍 Custom metrics being evaluated:', customMetricsList.length, 'metrics');
+    customMetricsList.forEach((m, i) => {
+      console.log(`  [${i}] ID: ${m.id}, Name: ${m.name}, Desc: ${m.desc}`);
+    });
+
     const qualityMetrics = await runPythonEvaluation(
       metrics.prompts,
       metrics.responses,
       (done, total) => {
         const percent = 65 + Math.round((done / total) * 25);
         sendEvent('progress', { percent, message: `Scoring response ${done}/${total}...` });
-      }
+      },
+      customMetricsList
     );
+
+    console.log('📊 Evaluation results keys:', Object.keys(qualityMetrics.aggregated_metrics || {}));
 
     metrics.qualityMetrics = qualityMetrics.aggregated_metrics || {};
     metrics.individualMetrics = qualityMetrics.individual_metrics || [];
