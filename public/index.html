@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SimChat</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 800px;
+      height: 90vh;
+      max-height: 700px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .header-left h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .header-left p {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .header-nav {
+      display: flex;
+      gap: 12px;
+    }
+
+    .header-nav a {
+      color: white;
+      text-decoration: none;
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+
+    .header-nav a:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .header-nav a.active {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      display: flex;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.user {
+      justify-content: flex-end;
+    }
+
+    .message.assistant {
+      justify-content: flex-start;
+    }
+
+    .message-content {
+      max-width: 70%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      word-wrap: break-word;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .message-content strong {
+      font-weight: 600;
+    }
+
+    .message-content em {
+      font-style: italic;
+    }
+
+    .message.user .message-content {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant .message-content {
+      background: #f0f0f0;
+      color: #333;
+      border-bottom-left-radius: 4px;
+    }
+
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      padding: 12px 16px;
+      background: #f0f0f0;
+      border-radius: 12px;
+      width: fit-content;
+    }
+
+    .typing-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #999;
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-dot:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-dot:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        opacity: 0.5;
+        transform: translateY(0);
+      }
+      30% {
+        opacity: 1;
+        transform: translateY(-10px);
+      }
+    }
+
+    .input-area {
+      border-top: 1px solid #e0e0e0;
+      padding: 16px;
+      display: flex;
+      gap: 8px;
+      background: #fafafa;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 8px;
+      flex: 1;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      border: 1px solid #ddd;
+      border-radius: 24px;
+      padding: 12px 16px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    input[type="text"]:disabled {
+      background: #f0f0f0;
+      cursor: not-allowed;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 24px;
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .clear-btn {
+      background: #999;
+      padding: 12px 16px;
+    }
+
+    .clear-btn:hover:not(:disabled) {
+      background: #777;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    .error-message {
+      background: #fee;
+      color: #c00;
+      padding: 12px 16px;
+      border-radius: 8px;
+      border-left: 4px solid #c00;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .system-prompt-area {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .system-prompt-area label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      margin-bottom: 6px;
+    }
+
+    .system-prompt-area textarea {
+      width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: monospace;
+      resize: vertical;
+      min-height: 60px;
+      outline: none;
+    }
+
+    .system-prompt-area textarea:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+    }
+
+    .status {
+      font-size: 11px;
+      color: #999;
+      text-align: center;
+      padding: 8px;
+    }
+
+    .status.connected {
+      color: #00aa00;
+    }
+
+    .status.error {
+      color: #cc0000;
+    }
+
+    @media (max-width: 600px) {
+      .message-content {
+        max-width: 85%;
+      }
+
+      .container {
+        max-height: 100vh;
+        border-radius: 0;
+      }
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #888;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-left">
+        <h1>💬 SimChat</h1>
+        <p id="status" class="status">Connecting...</p>
+      </div>
+      <div class="header-nav">
+        <a href="/" class="active">Chatbot</a>
+        <a href="/deepeval.html">📊 DeepEval</a>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages"></div>
+
+    <div class="input-area">
+      <div style="width: 100%;">
+        <div class="system-prompt-area">
+          <label for="systemPrompt">System Prompt (Optional):</label>
+          <textarea id="systemPrompt" placeholder="Set the context for the AI. E.g., 'You are a helpful assistant...'"></textarea>
+        </div>
+        <div id="errorContainer"></div>
+        <div class="input-group">
+          <input
+            type="text"
+            id="messageInput"
+            placeholder="Type your message..."
+            autocomplete="off"
+          >
+          <button id="sendBtn" onclick="sendMessage()">Send</button>
+          <button class="clear-btn" id="clearBtn" onclick="clearChat()">Clear</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const chatMessages = document.getElementById('chatMessages');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const systemPromptInput = document.getElementById('systemPrompt');
+    const statusEl = document.getElementById('status');
+    const errorContainer = document.getElementById('errorContainer');
+
+    let isLoading = false;
+    let conversationHistory = [];
+
+    async function checkHealth() {
+      try {
+        const response = await fetch('/api/health');
+        if (response.ok) {
+          statusEl.textContent = '✓ Connected';
+          statusEl.className = 'status connected';
+          return true;
+        }
+      } catch (error) {
+        statusEl.textContent = '✗ Connection Error';
+        statusEl.className = 'status error';
+        return false;
+      }
+    }
+
+    async function sendMessage() {
+      const userMessage = messageInput.value.trim();
+      if (!userMessage || isLoading) return;
+
+      messageInput.value = '';
+      isLoading = true;
+      sendBtn.disabled = true;
+      messageInput.disabled = true;
+      clearBtn.disabled = true;
+
+      addMessage('user', userMessage);
+      conversationHistory.push({ role: 'user', content: userMessage });
+
+      const typingId = showTyping();
+
+      try {
+        errorContainer.innerHTML = '';
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: conversationHistory,
+            systemPrompt: systemPromptInput.value.trim() || null,
+          }),
+        });
+
+        removeTyping(typingId);
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to get response');
+        }
+
+        const data = await response.json();
+        const assistantMessage = data.message;
+
+        addMessage('assistant', assistantMessage);
+        conversationHistory.push({ role: 'assistant', content: assistantMessage });
+      } catch (error) {
+        removeTyping(typingId);
+        showError(error.message);
+        console.error('Error:', error);
+      } finally {
+        isLoading = false;
+        sendBtn.disabled = false;
+        messageInput.disabled = false;
+        clearBtn.disabled = false;
+        messageInput.focus();
+      }
+    }
+
+    function addMessage(role, content) {
+      const messageEl = document.createElement('div');
+      messageEl.className = `message ${role}`;
+      const formattedContent = formatMarkdown(content);
+      messageEl.innerHTML = `<div class="message-content">${formattedContent}</div>`;
+      chatMessages.appendChild(messageEl);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function formatMarkdown(text) {
+      // Escape HTML first
+      let html = escapeHtml(text);
+      // Convert **text** to <strong>text</strong>
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      // Convert *text* to <em>text</em>
+      html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      // Convert line breaks
+      html = html.replace(/\n/g, '<br>');
+      return html;
+    }
+
+    function showTyping() {
+      const id = Date.now();
+      const messageEl = document.createElement('div');
+      messageEl.className = 'message assistant';
+      messageEl.id = `typing-${id}`;
+      messageEl.innerHTML = `
+        <div class="typing-indicator">
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+        </div>
+      `;
+      chatMessages.appendChild(messageEl);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      return id;
+    }
+
+    function removeTyping(id) {
+      const el = document.getElementById(`typing-${id}`);
+      if (el) el.remove();
+    }
+
+    function showError(message) {
+      errorContainer.innerHTML = `<div class="error-message">⚠️ ${escapeHtml(message)}</div>`;
+    }
+
+    function clearChat() {
+      if (confirm('Clear all messages? This cannot be undone.')) {
+        chatMessages.innerHTML = '';
+        conversationHistory = [];
+        errorContainer.innerHTML = '';
+        messageInput.focus();
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    window.addEventListener('load', async () => {
+      await checkHealth();
+      messageInput.focus();
+      addMessage('assistant', 'Hello! 👋 I\'m SimChat, your AI assistant. How can I help you today?');
+    });
+
+    window.sendMessage = sendMessage;
+    window.clearChat = clearChat;
+  </script>
+</body>
+</html>

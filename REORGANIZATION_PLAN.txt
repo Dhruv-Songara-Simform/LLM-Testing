@@ -1,0 +1,43 @@
+CODEBASE REORGANIZATION PLAN
+=============================
+
+BEFORE (Messy):
+├── deepeval/
+├── public/
+├── node_modules/
+├── *.md files scattered
+├── *.js files scattered
+└── *.py files scattered
+
+AFTER (Clean):
+├── src/
+│   ├── deepeval/              (Main evaluation framework)
+│   │   ├── evaluation/
+│   │   ├── datasets/
+│   │   ├── tests/
+│   │   ├── config/
+│   │   └── utils/
+│   ├── server/                (Node.js server)
+│   ├── public/                (Web UI)
+│   └── shared/                (Shared utilities)
+├── docs/                      (All markdown files)
+│   ├── CODEBASE_STRUCTURE.md
+│   ├── AI_CHATBOT_EVOLUTION_PROPOSAL.md
+│   ├── QUICK_START.md
+│   ├── guides/
+│   ├── api/
+│   └── architecture/
+├── reports/                   (Evaluation results)
+│   ├── runs/
+│   ├── custom/
+│   └── logs/
+├── artifacts/                 (Stored evaluation artifacts)
+├── config/                    (Configuration files)
+│   ├── .env
+│   ├── .env.example
+│   └── config.yml
+├── scripts/                   (Utility scripts)
+├── tests/                     (Integration tests)
+├── package.json
+├── requirements.txt
+└── CLAUDE.md

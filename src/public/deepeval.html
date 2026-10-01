@@ -1,0 +1,1752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepEval Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2pdf@0.10.1/dist/html2pdf.bundle.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    .navbar {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 16px 24px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .navbar h1 {
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    .navbar a {
+      color: white;
+      text-decoration: none;
+      margin-left: 24px;
+      font-size: 14px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+
+    .navbar a:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .card h2 {
+      font-size: 18px;
+      margin-bottom: 16px;
+      color: #333;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    textarea,
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    textarea:focus,
+    select:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+      font-family: monospace;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    button {
+      flex: 1;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #666;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: #555;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .metric-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      text-align: center;
+    }
+
+    .metric-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #667eea;
+      margin-bottom: 8px;
+    }
+
+    .metric-label {
+      font-size: 13px;
+      color: #999;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status {
+      padding: 16px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+
+    .status.loading {
+      background: #e3f2fd;
+      color: #1976d2;
+      border-left: 4px solid #1976d2;
+    }
+
+    .status.success {
+      background: #e8f5e9;
+      color: #388e3c;
+      border-left: 4px solid #388e3c;
+    }
+
+    .status.error {
+      background: #ffebee;
+      color: #c62828;
+      border-left: 4px solid #c62828;
+    }
+
+    .table-container {
+      overflow-x: auto;
+      margin-top: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    table th {
+      background: #f5f5f5;
+      padding: 12px;
+      text-align: left;
+      font-weight: 600;
+      color: #666;
+      border-bottom: 1px solid #ddd;
+    }
+
+    table td {
+      padding: 12px;
+      border-bottom: 1px solid #ddd;
+    }
+
+    table tr:hover {
+      background: #fafafa;
+    }
+
+    .prompt {
+      background: #f0f0f0;
+      padding: 8px 12px;
+      border-radius: 4px;
+      border-left: 3px solid #667eea;
+    }
+
+    .response {
+      background: #f9f9f9;
+      padding: 8px 12px;
+      border-radius: 4px;
+      max-height: 100px;
+      overflow-y: auto;
+    }
+
+    .prompt-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .prompt-tag {
+      background: #e3f2fd;
+      color: #1976d2;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .artifacts-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .artifact-item {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      border: 1px solid #ddd;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .artifact-item:hover {
+      border-color: #667eea;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+      transform: translateY(-2px);
+    }
+
+    .artifact-title {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+
+    .artifact-date {
+      font-size: 12px;
+      color: #999;
+      margin-bottom: 12px;
+    }
+
+    .artifact-metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+
+    .artifact-metric {
+      background: #f5f5f5;
+      padding: 8px;
+      border-radius: 4px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .tab {
+      padding: 12px 16px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-size: 14px;
+      font-weight: 600;
+      color: #999;
+      transition: all 0.2s;
+    }
+
+    .tab.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @media (max-width: 1200px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 600px) {
+      .navbar {
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .navbar a {
+        margin-left: 0;
+      }
+
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .artifacts-list {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .error-message {
+      background: #ffebee;
+      color: #c62828;
+      padding: 12px 16px;
+      border-radius: 6px;
+      border-left: 4px solid #c62828;
+      margin-bottom: 16px;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    .chart-container {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .chart-container h3 {
+      font-size: 16px;
+      margin-bottom: 16px;
+      color: #333;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      height: 300px;
+    }
+
+    .quality-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .quality-metric-badge {
+      background: white;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+      transition: all 0.2s;
+    }
+
+    .quality-metric-badge:hover {
+      border-color: #667eea;
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+    }
+
+    .quality-metric-badge.good {
+      border-color: #4caf50;
+      background: #f1f8e9;
+    }
+
+    .quality-metric-badge.average {
+      border-color: #ff9800;
+      background: #fff3e0;
+    }
+
+    .quality-metric-badge.poor {
+      border-color: #f44336;
+      background: #ffebee;
+    }
+
+    .quality-metric-name {
+      font-size: 11px;
+      color: #666;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .quality-metric-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #333;
+    }
+
+    .quality-metric-bar {
+      background: #e0e0e0;
+      border-radius: 4px;
+      height: 4px;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+
+    .quality-metric-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .quality-metric-status {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .quality-metric-badge.good .quality-metric-status {
+      color: #2e7d32;
+    }
+
+    .quality-metric-badge.poor .quality-metric-status {
+      color: #c62828;
+    }
+
+    .overall-pass-summary {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-weight: 700;
+      color: white;
+    }
+
+    .overall-pass-summary.all-pass {
+      background: linear-gradient(135deg, #43a047, #2e7d32);
+    }
+
+    .overall-pass-summary.some-fail {
+      background: linear-gradient(135deg, #e53935, #c62828);
+    }
+    .progress-spinner-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding-top: 12px;
+    }
+
+    .progress-spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(102, 126, 234, 0.2);
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: progress-spin 0.8s linear infinite;
+    }
+
+    @keyframes progress-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    h4 {
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    h5 {
+      font-size: 13px;
+      color: #666;
+      margin: 16px 0 12px 0;
+      font-weight: 600;
+    }
+
+    input[type="checkbox"] {
+      accent-color: #667eea;
+    }
+
+    input[type="checkbox"]:hover {
+      cursor: pointer;
+    }
+
+    label {
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <h1>📊 DeepEval Dashboard</h1>
+    <div>
+      <a href="/">💬 Chatbot</a>
+      <a href="/deepeval.html">📊 DeepEval</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <div class="card">
+        <h2>Configuration</h2>
+        <div class="form-group">
+          <label for="apiEndpoint">API Endpoint *</label>
+          <input
+            type="text"
+            id="apiEndpoint"
+            placeholder="http://localhost:3000/api/chat"
+            value="http://localhost:3000/api/chat"
+          >
+        </div>
+
+        <div class="form-group">
+          <label for="systemPrompt">System Prompt (Optional)</label>
+          <textarea
+            id="systemPrompt"
+            placeholder="Set the context for evaluation..."
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="numTests">Number of Test Prompts</label>
+          <input
+            type="number"
+            id="numTests"
+            value="5"
+            min="1"
+            max="20"
+          >
+          <p style="font-size: 12px; color: #666; margin-top: 6px;">
+            💡 Total questions to generate (includes initial + follow-ups)
+          </p>
+        </div>
+
+        <div class="button-group">
+          <button onclick="runDeepEval()">▶ Run DeepEval</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Evaluation Mode</h2>
+        <div class="form-group">
+          <label for="evaluationMode">Select Mode *</label>
+          <select id="evaluationMode" onchange="updateModeUI()">
+            <option value="dynamic">🤖 Dynamic (AI-Generated Follow-ups)</option>
+            <option value="static">📝 Static (Predefined Questions)</option>
+          </select>
+        </div>
+
+        <div id="dynamicModeUI">
+          <div class="form-group">
+            <label for="initialPrompt">Initial Question *</label>
+            <textarea
+              id="initialPrompt"
+              placeholder="Start with a base question..."
+              style="min-height: 80px;"
+            >What is machine learning?</textarea>
+          </div>
+          <p style="font-size: 12px; color: #666; margin-bottom: 16px;">
+            ℹ️ <strong>How it works:</strong><br>
+            1️⃣ Sends your initial question to the chatbot<br>
+            2️⃣ DeepSeek generates follow-up questions based on the response<br>
+            3️⃣ Tests chatbot for consistency, contradictions, and knowledge depth<br>
+            📊 Total prompts will be: 1 (initial) + (Number of Test Prompts - 1) follow-ups
+          </p>
+        </div>
+
+        <div id="staticModeUI" style="display: none;">
+          <div id="promptsList" class="prompt-list"></div>
+          <div class="form-group" style="margin-top: 16px;">
+            <label for="customPrompt">Add Custom Prompt</label>
+            <textarea
+              id="customPrompt"
+              placeholder="Enter your test prompt..."
+              style="min-height: 80px;"
+            ></textarea>
+          </div>
+          <button onclick="addCustomPrompt()" style="width: 100%;">+ Add Prompt</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="statusContainer"></div>
+
+    <div id="progressContainer" style="display: none; margin-bottom: 24px;">
+      <div class="card">
+        <h2>Evaluation Progress</h2>
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span id="progressText">Initializing...</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden;">
+            <div id="progressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); transition: width 0.3s ease;"></div>
+          </div>
+        </div>
+        <div id="progressSpinnerRow" class="progress-spinner-row">
+          <div class="progress-spinner"></div>
+          <span style="font-size: 13px; color: #666;">Processing — please keep this tab open...</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="metricsContainer" style="display: none;">
+      <div class="metrics-grid" id="metricsGrid"></div>
+    </div>
+
+    <div id="resultsContainer" style="display: none;">
+      <div class="card full-width">
+        <div class="tabs">
+          <div class="tab active" onclick="switchTab('conversation')">💬 Conversation</div>
+          <div class="tab" onclick="switchTab('quality')">⭐ Quality Metrics</div>
+          <div class="tab" onclick="switchTab('analysis')">📈 Analysis</div>
+          <div class="tab" onclick="switchTab('artifacts')">📁 Artifacts</div>
+        </div>
+
+        <div id="conversation" class="tab-content active">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 50%;">Prompt</th>
+                  <th style="width: 50%;">Response</th>
+                </tr>
+              </thead>
+              <tbody id="conversationTable">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="quality" class="tab-content">
+          <div style="margin-bottom: 24px;">
+            <h3>📊 Overall Quality Metrics</h3>
+            <div id="overallPassSummary"></div>
+            <div class="quality-metrics-grid" id="qualityMetricsGrid"></div>
+          </div>
+          <div class="charts-grid" id="qualityChartsGrid"></div>
+        </div>
+
+        <div id="analysis" class="tab-content">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody id="analysisTable">
+              </tbody>
+            </table>
+          </div>
+          <div class="charts-grid" id="chartsGrid"></div>
+        </div>
+
+        <div id="artifacts" class="tab-content">
+          <div style="margin-bottom: 24px;">
+            <h3>📋 Custom Metrics Configuration</h3>
+            <div style="background: #f9f9f9; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+              <div class="form-group">
+                <label for="customMetricInput">Describe Custom Metric *</label>
+                <textarea
+                  id="customMetricInput"
+                  placeholder="E.g., 'Response length should be between 50-500 words' or 'Ensure response uses bullet points'"
+                  style="min-height: 80px; width: 100%;"
+                ></textarea>
+              </div>
+              <div class="button-group">
+                <button onclick="addCustomMetric()" style="flex: 1;">➕ Add Custom Metric</button>
+                <button onclick="proceedToMetricsSelection()" class="btn-secondary" style="flex: 1;">✓ Next</button>
+              </div>
+            </div>
+
+            <div id="customMetricsSection" style="display: none;">
+              <h4 style="margin-bottom: 12px;">Custom Metrics Added: <span id="customMetricCount">0</span></h4>
+              <div id="customMetricsList" style="margin-bottom: 24px;"></div>
+
+              <h4 style="margin-bottom: 12px;">Select Metrics to Include in Report</h4>
+
+              <div style="margin-bottom: 20px;">
+                <h5 style="color: #666; margin-bottom: 12px; font-weight: 600;">📊 Built-in Metrics</h5>
+                <div id="builtinMetricsCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                </div>
+              </div>
+
+              <div style="margin-bottom: 24px;">
+                <h5 style="color: #666; margin-bottom: 12px; font-weight: 600;">🎯 Custom Metrics</h5>
+                <div id="customMetricsCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                </div>
+              </div>
+
+              <div style="border-top: 1px solid #ddd; padding-top: 16px;">
+                <button onclick="generatePDFReport()" style="width: 100%; background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%); margin-bottom: 8px;">
+                  📥 Download PDF Report
+                </button>
+                <button onclick="exportMetricsJSON()" style="width: 100%; background: #667eea;" class="btn-secondary">
+                  💾 Export as JSON
+                </button>
+              </div>
+            </div>
+          </div>
+          <div id="artifactsList" class="artifacts-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let customPrompts = [
+      'What is the capital of France?',
+      'Explain machine learning in simple terms',
+      'How do you make a cup of tea?',
+      'What are the benefits of exercise?',
+      'Tell me a short story',
+    ];
+
+    let currentEvaluation = null;
+
+    // Custom Metrics Management
+    const BUILTIN_METRICS = [
+      'Answer Relevancy',
+      'Faithfulness',
+      'Contextual Precision',
+      'Contextual Recall',
+      'Contextual Relevancy',
+      'Hallucination',
+      'Toxicity',
+      'Summarization'
+    ];
+
+    let customMetrics = [];
+    let selectedMetrics = {
+      builtin: new Set(BUILTIN_METRICS),
+      custom: new Set()
+    };
+
+    function addCustomMetric() {
+      const input = document.getElementById('customMetricInput');
+      const description = input.value.trim();
+
+      if (!description) {
+        showStatus('Please describe a custom metric', 'error');
+        return;
+      }
+
+      if (customMetrics.length >= 20) {
+        showStatus('Maximum 20 custom metrics allowed', 'error');
+        return;
+      }
+
+      const metric = {
+        id: 'custom_' + Date.now(),
+        name: description.substring(0, 50) + (description.length > 50 ? '...' : ''),
+        fullDescription: description,
+        timestamp: new Date().toLocaleString()
+      };
+
+      customMetrics.push(metric);
+      selectedMetrics.custom.add(metric.name);
+      input.value = '';
+
+      updateCustomMetricsList();
+      updateMetricsCheckboxes();
+
+      showStatus(`✅ Custom metric added: "${metric.name}"`, 'success');
+    }
+
+    function removeCustomMetric(id) {
+      const metricIndex = customMetrics.findIndex(m => m.id === id);
+      if (metricIndex > -1) {
+        const metric = customMetrics[metricIndex];
+        selectedMetrics.custom.delete(metric.name);
+        customMetrics.splice(metricIndex, 1);
+        updateCustomMetricsList();
+        updateMetricsCheckboxes();
+      }
+    }
+
+    function updateCustomMetricsList() {
+      const list = document.getElementById('customMetricsList');
+      const count = document.getElementById('customMetricCount');
+
+      count.textContent = customMetrics.length;
+
+      if (customMetrics.length === 0) {
+        list.innerHTML = '<p style="color: #999; font-size: 13px;">No custom metrics added yet</p>';
+        return;
+      }
+
+      list.innerHTML = customMetrics.map(metric => `
+        <div style="background: white; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-weight: 600; color: #333; margin-bottom: 4px;">🎯 ${escapeHtml(metric.name)}</div>
+            <div style="font-size: 12px; color: #666;">${escapeHtml(metric.fullDescription)}</div>
+            <div style="font-size: 11px; color: #999; margin-top: 4px;">Added: ${metric.timestamp}</div>
+          </div>
+          <button onclick="removeCustomMetric('${metric.id}')" style="
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+            margin-left: 12px;
+          ">Remove</button>
+        </div>
+      `).join('');
+    }
+
+    function proceedToMetricsSelection() {
+      document.getElementById('customMetricsSection').style.display = 'block';
+      updateMetricsCheckboxes();
+      document.getElementById('customMetricInput').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function updateMetricsCheckboxes() {
+      // Built-in metrics checkboxes
+      const builtinContainer = document.getElementById('builtinMetricsCheckboxes');
+      builtinContainer.innerHTML = BUILTIN_METRICS.map(metric => `
+        <label style="display: flex; align-items: center; cursor: pointer; padding: 8px; border-radius: 6px; transition: background 0.2s; background: ${selectedMetrics.builtin.has(metric) ? '#e3f2fd' : '#f5f5f5'};">
+          <input type="checkbox"
+            ${selectedMetrics.builtin.has(metric) ? 'checked' : ''}
+            onchange="toggleMetric('builtin', '${metric}', this.checked)"
+            style="margin-right: 8px; cursor: pointer; width: 18px; height: 18px;"
+          >
+          <span style="font-size: 13px; color: #333;">${metric}</span>
+        </label>
+      `).join('');
+
+      // Custom metrics checkboxes
+      const customContainer = document.getElementById('customMetricsCheckboxes');
+      if (customMetrics.length === 0) {
+        customContainer.innerHTML = '<p style="color: #999; font-size: 13px;">No custom metrics added yet</p>';
+      } else {
+        customContainer.innerHTML = customMetrics.map(metric => `
+          <label style="display: flex; align-items: center; cursor: pointer; padding: 8px; border-radius: 6px; transition: background 0.2s; background: ${selectedMetrics.custom.has(metric.name) ? '#f1f8e9' : '#f5f5f5'};">
+            <input type="checkbox"
+              ${selectedMetrics.custom.has(metric.name) ? 'checked' : ''}
+              onchange="toggleMetric('custom', '${metric.name}', this.checked)"
+              style="margin-right: 8px; cursor: pointer; width: 18px; height: 18px;"
+            >
+            <span style="font-size: 13px; color: #333;">${escapeHtml(metric.name)}</span>
+          </label>
+        `).join('');
+      }
+    }
+
+    function toggleMetric(type, name, isChecked) {
+      if (type === 'builtin') {
+        if (isChecked) {
+          selectedMetrics.builtin.add(name);
+        } else {
+          selectedMetrics.builtin.delete(name);
+        }
+      } else {
+        if (isChecked) {
+          selectedMetrics.custom.add(name);
+        } else {
+          selectedMetrics.custom.delete(name);
+        }
+      }
+    }
+
+    function generatePDFReport() {
+      if (selectedMetrics.builtin.size === 0 && selectedMetrics.custom.size === 0) {
+        showStatus('Please select at least one metric', 'error');
+        return;
+      }
+
+      const element = document.createElement('div');
+      element.style.padding = '40px';
+      element.style.fontFamily = 'Arial, sans-serif';
+      element.style.lineHeight = '1.6';
+      element.style.color = '#333';
+
+      const timestamp = new Date().toLocaleString();
+      const totalMetrics = selectedMetrics.builtin.size + selectedMetrics.custom.size;
+
+      element.innerHTML = `
+        <div style="text-align: center; margin-bottom: 40px; border-bottom: 3px solid #667eea; padding-bottom: 20px;">
+          <h1 style="color: #667eea; margin: 0; font-size: 32px;">DeepEval Report</h1>
+          <h2 style="color: #666; margin: 10px 0 0 0; font-size: 16px; font-weight: normal;">Custom Metrics Analysis</h2>
+        </div>
+
+        <div style="margin-bottom: 30px;">
+          <h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📋 Report Summary</h3>
+          <table style="width: 100%; margin-top: 15px; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold; width: 30%;">Generated Date</td>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${timestamp}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Total Metrics Selected</td>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${totalMetrics}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Built-in Metrics</td>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${selectedMetrics.builtin.size}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Custom Metrics</td>
+              <td style="padding: 10px; border-bottom: 1px solid #ddd;">${selectedMetrics.custom.size}</td>
+            </tr>
+          </table>
+        </div>
+
+        ${selectedMetrics.builtin.size > 0 ? `
+          <div style="margin-bottom: 30px; page-break-inside: avoid;">
+            <h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📊 Built-in Metrics</h3>
+            <ol style="margin-top: 15px; padding-left: 20px;">
+              ${Array.from(selectedMetrics.builtin).map((metric, i) => `
+                <li style="margin-bottom: 12px; line-height: 1.5;">
+                  <strong>${metric}</strong>
+                  <br/>
+                  <span style="color: #666; font-size: 13px;">Standard DeepEval metric for comprehensive chatbot evaluation</span>
+                </li>
+              `).join('')}
+            </ol>
+          </div>
+        ` : ''}
+
+        ${selectedMetrics.custom.size > 0 ? `
+          <div style="margin-bottom: 30px; page-break-inside: avoid;">
+            <h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px;">🎯 Custom Metrics</h3>
+            <ol style="margin-top: 15px; padding-left: 20px;">
+              ${customMetrics.filter(m => selectedMetrics.custom.has(m.name)).map((metric, i) => `
+                <li style="margin-bottom: 16px; line-height: 1.5;">
+                  <strong>${escapeHtml(metric.name)}</strong>
+                  <br/>
+                  <span style="color: #666;">Description: ${escapeHtml(metric.fullDescription)}</span>
+                  <br/>
+                  <span style="color: #999; font-size: 12px;">Added: ${metric.timestamp}</span>
+                </li>
+              `).join('')}
+            </ol>
+          </div>
+        ` : ''}
+
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #e0e0e0; color: #999; font-size: 12px; text-align: center;">
+          <p style="margin: 5px 0;">DeepEval Framework v1.1.0</p>
+          <p style="margin: 5px 0;">© 2026 SimChat. All rights reserved.</p>
+          <p style="margin: 5px 0;">This report is confidential and for authorized use only.</p>
+        </div>
+      `;
+
+      const opt = {
+        margin: 10,
+        filename: `deepeval-metrics-report-${Date.now()}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      html2pdf().set(opt).from(element).save();
+      showStatus('✅ PDF report downloaded successfully!', 'success');
+    }
+
+    function exportMetricsJSON() {
+      const report = {
+        timestamp: new Date().toISOString(),
+        summary: {
+          totalMetrics: selectedMetrics.builtin.size + selectedMetrics.custom.size,
+          builtinMetrics: selectedMetrics.builtin.size,
+          customMetrics: selectedMetrics.custom.size
+        },
+        metrics: {
+          builtin: Array.from(selectedMetrics.builtin),
+          custom: customMetrics.filter(m => selectedMetrics.custom.has(m.name))
+        },
+        evaluation: currentEvaluation ? {
+          apiEndpoint: currentEvaluation.metrics?.apiEndpoint,
+          totalMessages: currentEvaluation.metrics?.totalMessages,
+          averageResponseTime: currentEvaluation.metrics?.averageResponseTime,
+          timestamp: currentEvaluation.metrics?.timestamp
+        } : null
+      };
+
+      const dataStr = JSON.stringify(report, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `deepeval-metrics-export-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showStatus('✅ Metrics exported as JSON!', 'success');
+    }
+
+    function updatePromptsList() {
+      const list = document.getElementById('promptsList');
+      list.innerHTML = customPrompts.map((p, i) => `
+        <div class="prompt-tag">
+          ${p}
+          <button onclick="removePrompt(${i})" style="
+            background: none;
+            border: none;
+            color: inherit;
+            cursor: pointer;
+            margin-left: 8px;
+            font-size: 16px;
+          ">×</button>
+        </div>
+      `).join('');
+    }
+
+    function addCustomPrompt() {
+      const input = document.getElementById('customPrompt');
+      const prompt = input.value.trim();
+
+      if (prompt && !customPrompts.includes(prompt)) {
+        customPrompts.push(prompt);
+        input.value = '';
+        updatePromptsList();
+      }
+    }
+
+    function removePrompt(index) {
+      customPrompts.splice(index, 1);
+      updatePromptsList();
+    }
+
+    function updateModeUI() {
+      const mode = document.getElementById('evaluationMode').value;
+      document.getElementById('dynamicModeUI').style.display = mode === 'dynamic' ? 'block' : 'none';
+      document.getElementById('staticModeUI').style.display = mode === 'static' ? 'block' : 'none';
+    }
+
+    async function runDeepEval() {
+      const apiEndpoint = document.getElementById('apiEndpoint').value.trim();
+      const systemPrompt = document.getElementById('systemPrompt').value.trim();
+      const evaluationMode = document.getElementById('evaluationMode').value;
+      const numTests = parseInt(document.getElementById('numTests').value);
+      const statusContainer = document.getElementById('statusContainer');
+      const resultsContainer = document.getElementById('resultsContainer');
+      const metricsContainer = document.getElementById('metricsContainer');
+      const progressContainer = document.getElementById('progressContainer');
+
+      if (!apiEndpoint) {
+        showStatus('Please enter an API endpoint', 'error');
+        return;
+      }
+
+      showStatus('🔄 Running DeepEval evaluation...', 'loading');
+      resultsContainer.style.display = 'none';
+      metricsContainer.style.display = 'none';
+      progressContainer.style.display = 'block';
+      updateProgress(0, 'Initializing evaluation...');
+
+      try {
+        const payload = {
+          apiEndpoint,
+          evaluationCriteria: {
+            systemPrompt: systemPrompt || null,
+          },
+          evaluationMode,
+        };
+
+        if (evaluationMode === 'dynamic') {
+          let initialPrompt = document.getElementById('initialPrompt').value.trim();
+
+          // If system prompt exists and initial prompt is default, generate from system prompt
+          if (systemPrompt && (!initialPrompt || initialPrompt === 'What is machine learning?')) {
+            updateProgress(5, '🤖 Generating initial question from system prompt...');
+            initialPrompt = await generateInitialQuestion(systemPrompt);
+            document.getElementById('initialPrompt').value = initialPrompt;
+          }
+
+          if (!initialPrompt) {
+            throw new Error('Please enter an initial question for dynamic mode');
+          }
+          payload.initialPrompt = initialPrompt;
+          payload.numberOfTests = numTests;
+        } else {
+          payload.testPrompts = customPrompts;
+        }
+
+        updateProgress(10, `Sending request (${numTests} test prompts)...`);
+
+        const response = await fetch('/api/deepeval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || 'Evaluation failed');
+        }
+
+        // Server streams real progress as Server-Sent Events (one per prompt/metric
+        // processed) instead of one blocking response, so the bar advances the whole
+        // time instead of sitting still and then jumping to 100% at the end.
+        const data = await consumeProgressStream(response);
+
+        if (!data) {
+          throw new Error('Evaluation stream ended unexpectedly');
+        }
+
+        currentEvaluation = data;
+
+        updateProgress(94, 'Loading conversation data and generating charts...');
+        displayMetrics(data.metrics);
+
+        updateProgress(96, 'Creating performance graphs...');
+        await loadConversationResults(data);
+
+        updateProgress(98, 'Loading artifacts...');
+        await loadArtifacts();
+
+        updateProgress(100, '✅ Evaluation complete!');
+        setTimeout(() => {
+          progressContainer.style.display = 'none';
+        }, 500);
+
+        showStatus('✅ DeepEval completed successfully!', 'success');
+        resultsContainer.style.display = 'block';
+        metricsContainer.style.display = 'block';
+      } catch (error) {
+        progressContainer.style.display = 'none';
+        showStatus(`❌ Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    function updateProgress(percent, text) {
+      const progressBar = document.getElementById('progressBar');
+      const progressPercent = document.getElementById('progressPercent');
+      const progressText = document.getElementById('progressText');
+      const progressSpinnerRow = document.getElementById('progressSpinnerRow');
+
+      progressBar.style.width = percent + '%';
+      progressPercent.textContent = percent + '%';
+      progressText.textContent = text;
+      if (progressSpinnerRow) {
+        progressSpinnerRow.style.display = percent >= 100 ? 'none' : 'flex';
+      }
+    }
+
+    // Reads the /api/deepeval Server-Sent Events stream: 'progress' events update the
+    // bar in real time, 'complete' carries the final result, 'error' aborts the run.
+    async function consumeProgressStream(response) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let result = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop();
+
+        for (const chunk of chunks) {
+          const line = chunk.trim();
+          if (!line.startsWith('data:')) continue;
+
+          const payloadStr = line.slice(5).trim();
+          if (!payloadStr) continue;
+
+          let event;
+          try {
+            event = JSON.parse(payloadStr);
+          } catch (e) {
+            continue;
+          }
+
+          if (event.type === 'progress') {
+            updateProgress(event.percent, event.message);
+          } else if (event.type === 'error') {
+            throw new Error(event.error || 'Evaluation failed');
+          } else if (event.type === 'complete') {
+            result = event;
+          }
+        }
+      }
+
+      return result;
+    }
+
+    async function generateInitialQuestion(systemPrompt) {
+      try {
+        const response = await fetch('/api/generate-question', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ systemPrompt }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to generate question');
+        }
+
+        const data = await response.json();
+        return data.question || 'Can you help me with this task?';
+      } catch (error) {
+        console.error('Error generating question:', error);
+        return 'Based on your system prompt, what are your key responsibilities?';
+      }
+    }
+
+    function displayMetrics(metrics) {
+      const metricsGrid = document.getElementById('metricsGrid');
+
+      // Calculate overall quality score
+      let overallScore = 'N/A';
+      if (metrics.qualityMetrics && Object.keys(metrics.qualityMetrics).length > 0) {
+        const scores = Object.values(metrics.qualityMetrics).map(d => d.avg);
+        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+        overallScore = (avgScore * 100).toFixed(0) + '%';
+      }
+
+      metricsGrid.innerHTML = `
+        <div class="metric-card">
+          <div class="metric-value">${metrics.totalMessages}</div>
+          <div class="metric-label">Total Messages</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">${metrics.averageResponseTime}ms</div>
+          <div class="metric-label">Avg Response Time</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">${metrics.prompts.length}</div>
+          <div class="metric-label">Test Prompts</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value" style="color: #4caf50;">${overallScore}</div>
+          <div class="metric-label">Quality Score</div>
+        </div>
+      `;
+    }
+
+    async function loadConversationResults(evaluationData) {
+      try {
+        const table = document.getElementById('conversationTable');
+        const metrics = evaluationData.metrics;
+
+        let html = '';
+        for (let i = 0; i < metrics.prompts.length; i++) {
+          html += `
+            <tr>
+              <td><div class="prompt">${escapeHtml(metrics.prompts[i])}</div></td>
+              <td><div class="response">${escapeHtml(metrics.responses[i])}</div></td>
+            </tr>
+          `;
+        }
+        table.innerHTML = html;
+
+        const analysisTable = document.getElementById('analysisTable');
+        const responseTimes = metrics.responseTimes || [];
+        const minTime = responseTimes.length > 0 ? Math.min(...responseTimes) : 0;
+        const maxTime = responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
+
+        analysisTable.innerHTML = `
+          <tr>
+            <td>Evaluation Mode</td>
+            <td><strong>${metrics.evaluationMode === 'dynamic' ? '🤖 Dynamic (AI-Generated)' : '📝 Static (Predefined)'}</strong></td>
+          </tr>
+          <tr>
+            <td>Total Messages</td>
+            <td><strong>${metrics.totalMessages}</strong></td>
+          </tr>
+          <tr>
+            <td>Average Response Time</td>
+            <td><strong>${metrics.averageResponseTime}ms</strong></td>
+          </tr>
+          <tr>
+            <td>Min Response Time</td>
+            <td><strong>${minTime}ms</strong></td>
+          </tr>
+          <tr>
+            <td>Max Response Time</td>
+            <td><strong>${maxTime}ms</strong></td>
+          </tr>
+          <tr>
+            <td>Number of Prompts</td>
+            <td><strong>${metrics.prompts.length}</strong></td>
+          </tr>
+          <tr>
+            <td>Evaluation Timestamp</td>
+            <td><strong>${new Date(metrics.timestamp).toLocaleString()}</strong></td>
+          </tr>
+          <tr>
+            <td>API Endpoint</td>
+            <td><strong>${escapeHtml(metrics.apiEndpoint)}</strong></td>
+          </tr>
+        `;
+
+        // Display quality metrics if available
+        if (metrics.qualityMetrics && Object.keys(metrics.qualityMetrics).length > 0) {
+          displayOverallPassSummary(metrics);
+          displayQualityMetrics(metrics.qualityMetrics, metrics.individualMetrics);
+        }
+
+        // Generate performance charts
+        createPerformanceCharts(metrics);
+      } catch (error) {
+        console.error(error);
+        showStatus(`Failed to load conversation: ${error.message}`, 'error');
+      }
+    }
+
+    // Uniform quality bar applied to every metric — must match PASS_THRESHOLD in evaluate_responses.py
+    const PASS_THRESHOLD = 0.75;
+
+    function displayOverallPassSummary(metrics) {
+      const el = document.getElementById('overallPassSummary');
+      if (!el) return;
+
+      const passed = metrics.metricsPassed ?? 0;
+      const total = metrics.metricsTotal ?? 0;
+      const rate = total > 0 ? Math.round((passed / total) * 100) : 0;
+      const allPass = metrics.overallPass;
+
+      el.innerHTML = `
+        <div class="overall-pass-summary ${allPass ? 'all-pass' : 'some-fail'}">
+          <span>${allPass ? '✅ ALL METRICS PASSED' : '⚠️ SOME METRICS BELOW 75% THRESHOLD'}</span>
+          <span>${passed}/${total} metrics passed (${rate}%)</span>
+        </div>
+      `;
+    }
+
+    function displayQualityMetrics(qualityMetrics, individualMetrics) {
+      const grid = document.getElementById('qualityMetricsGrid');
+      if (!grid) return;
+
+      const metricLabels = {
+        'answer_relevancy': 'Answer Relevancy',
+        'faithfulness': 'Faithfulness',
+        'contextual_precision': 'Contextual Precision',
+        'contextual_recall': 'Contextual Recall',
+        'contextual_relevancy': 'Contextual Relevancy',
+        'hallucination': 'Hallucination',
+        'toxicity': 'Toxicity',
+        'summarization': 'Summarization',
+        'response_length': 'Response Length',
+        'completeness': 'Completeness',
+        'clarity': 'Clarity'
+      };
+
+      let html = '';
+      for (const [key, data] of Object.entries(qualityMetrics)) {
+        const label = metricLabels[key] || key.replace(/_/g, ' ');
+        const avg = data.avg;
+        const threshold = data.threshold ?? PASS_THRESHOLD;
+        const passed = data.passed ?? (avg >= threshold);
+        const className = passed ? 'good' : 'poor';
+        const status = passed ? `✅ Pass (≥${(threshold * 100).toFixed(0)}%)` : `❌ Fail (<${(threshold * 100).toFixed(0)}%)`;
+
+        html += `
+          <div class="quality-metric-badge ${className}">
+            <div class="quality-metric-name">${label}</div>
+            <div class="quality-metric-value">${(avg * 100).toFixed(0)}%</div>
+            <div class="quality-metric-bar">
+              <div class="quality-metric-bar-fill" style="width: ${avg * 100}%; background: ${
+                passed ? '#4caf50' : '#f44336'
+              };"></div>
+            </div>
+            <div class="quality-metric-status">${status}</div>
+          </div>
+        `;
+      }
+      grid.innerHTML = html;
+
+      // Create quality metrics charts
+      createQualityMetricsCharts(qualityMetrics);
+    }
+
+    function createQualityMetricsCharts(qualityMetrics) {
+      const chartsGrid = document.getElementById('qualityChartsGrid');
+      if (!chartsGrid) return;
+
+      chartsGrid.innerHTML = '';
+
+      // Chart 1: Quality Metrics Radar
+      const radarChart = document.createElement('div');
+      radarChart.className = 'chart-container';
+      radarChart.innerHTML = `
+        <h3>⭐ Quality Metrics Overview</h3>
+        <div class="chart-wrapper">
+          <canvas id="qualityRadarChart"></canvas>
+        </div>
+      `;
+      chartsGrid.appendChild(radarChart);
+
+      // Chart 2: Individual Response Scores
+      const scoresChart = document.createElement('div');
+      scoresChart.className = 'chart-container';
+      scoresChart.innerHTML = `
+        <h3>📊 Metric Scores Distribution</h3>
+        <div class="chart-wrapper">
+          <canvas id="qualityScoresChart"></canvas>
+        </div>
+      `;
+      chartsGrid.appendChild(scoresChart);
+
+      setTimeout(() => {
+        const metricNames = Object.keys(qualityMetrics).map(k =>
+          k.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+        );
+        const metricAvgs = Object.values(qualityMetrics).map(d => d.avg);
+
+        // Radar Chart
+        const ctx1 = document.getElementById('qualityRadarChart');
+        if (ctx1 && metricAvgs.length > 0) {
+          new Chart(ctx1, {
+            type: 'radar',
+            data: {
+              labels: metricNames,
+              datasets: [{
+                label: 'Quality Scores',
+                data: metricAvgs,
+                borderColor: '#667eea',
+                backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                fill: true,
+                pointBackgroundColor: '#667eea',
+                pointRadius: 4,
+                pointHoverRadius: 6
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                r: {
+                  beginAtZero: true,
+                  max: 1,
+                  ticks: {
+                    stepSize: 0.2
+                  }
+                }
+              },
+              plugins: {
+                legend: { display: true }
+              }
+            }
+          });
+        }
+
+        // Scores Bar Chart
+        const ctx2 = document.getElementById('qualityScoresChart');
+        if (ctx2 && metricAvgs.length > 0) {
+          new Chart(ctx2, {
+            type: 'bar',
+            data: {
+              labels: metricNames,
+              datasets: [{
+                label: 'Score (%)',
+                data: metricAvgs.map(v => v * 100),
+                backgroundColor: metricAvgs.map(v =>
+                  v >= 0.7 ? '#4caf50' : v >= 0.5 ? '#ff9800' : '#f44336'
+                ),
+                borderRadius: 4
+              }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false }
+              },
+              scales: {
+                x: {
+                  beginAtZero: true,
+                  max: 100
+                }
+              }
+            }
+          });
+        }
+      }, 100);
+    }
+
+    function createPerformanceCharts(metrics) {
+      const chartsGrid = document.getElementById('chartsGrid');
+      chartsGrid.innerHTML = '';
+
+      const responseTimes = metrics.responseTimes || [];
+
+      // Chart 1: Response Time Distribution
+      const responseTimeChart = document.createElement('div');
+      responseTimeChart.className = 'chart-container';
+      responseTimeChart.innerHTML = `
+        <h3>📊 Response Time Distribution</h3>
+        <div class="chart-wrapper">
+          <canvas id="responseTimeChart"></canvas>
+        </div>
+      `;
+      chartsGrid.appendChild(responseTimeChart);
+
+      // Chart 2: Response Quality Metrics
+      const metricsChart = document.createElement('div');
+      metricsChart.className = 'chart-container';
+      metricsChart.innerHTML = `
+        <h3>⚡ Performance Metrics</h3>
+        <div class="chart-wrapper">
+          <canvas id="metricsChartCanvas"></canvas>
+        </div>
+      `;
+      chartsGrid.appendChild(metricsChart);
+
+      // Chart 3: Prompts vs Responses
+      const coverageChart = document.createElement('div');
+      coverageChart.className = 'chart-container';
+      coverageChart.innerHTML = `
+        <h3>📈 Evaluation Coverage</h3>
+        <div class="chart-wrapper">
+          <canvas id="coverageChart"></canvas>
+        </div>
+      `;
+      chartsGrid.appendChild(coverageChart);
+
+      // Initialize charts after DOM update
+      setTimeout(() => {
+        // Response Time Distribution Chart
+        const ctx1 = document.getElementById('responseTimeChart');
+        if (ctx1) {
+          new Chart(ctx1, {
+            type: 'line',
+            data: {
+              labels: responseTimes.map((_, i) => `Q${i + 1}`),
+              datasets: [{
+                label: 'Response Time (ms)',
+                data: responseTimes,
+                borderColor: '#667eea',
+                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                tension: 0.4,
+                fill: true,
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: true }
+              },
+              scales: {
+                y: { beginAtZero: true }
+              }
+            }
+          });
+        }
+
+        // Metrics Chart
+        const ctx2 = document.getElementById('metricsChartCanvas');
+        if (ctx2) {
+          new Chart(ctx2, {
+            type: 'bar',
+            data: {
+              labels: ['Avg Time', 'Min Time', 'Max Time'],
+              datasets: [{
+                label: 'Time (ms)',
+                data: [
+                  metrics.averageResponseTime,
+                  Math.min(...responseTimes),
+                  Math.max(...responseTimes)
+                ],
+                backgroundColor: [
+                  '#667eea',
+                  '#764ba2',
+                  '#f093fb'
+                ]
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false }
+              },
+              scales: {
+                y: { beginAtZero: true }
+              }
+            }
+          });
+        }
+
+        // Coverage Chart
+        const ctx3 = document.getElementById('coverageChart');
+        if (ctx3) {
+          new Chart(ctx3, {
+            type: 'doughnut',
+            data: {
+              labels: ['Questions Evaluated', 'Coverage %'],
+              datasets: [{
+                data: [
+                  metrics.prompts.length,
+                  100
+                ],
+                backgroundColor: ['#667eea', '#e0e0e0'],
+                borderColor: ['#667eea', '#e0e0e0']
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: true }
+              }
+            }
+          });
+        }
+      }, 100);
+    }
+
+    async function loadArtifacts() {
+      try {
+        const response = await fetch('/api/artifacts');
+        if (!response.ok) throw new Error('Failed to load artifacts');
+
+        const artifacts = await response.json();
+        const artifactsList = document.getElementById('artifactsList');
+
+        artifactsList.innerHTML = artifacts.slice(0, 10).map(artifact => `
+          <div class="artifact-item" onclick="viewArtifact('${artifact.id}')">
+            <div class="artifact-title">📊 Evaluation ${artifact.id.substring(0, 8)}</div>
+            <div class="artifact-date">${new Date(artifact.createdAt).toLocaleString()}</div>
+            <div class="artifact-metrics">
+              <div class="artifact-metric">Messages: ${artifact.metrics.totalMessages}</div>
+              <div class="artifact-metric">Response: ${artifact.metrics.averageResponseTime}ms</div>
+              <div class="artifact-metric">Prompts: ${artifact.metrics.prompts.length}</div>
+              <div class="artifact-metric">
+                <a href="/api/artifacts/${artifact.id}" download style="color: #667eea; text-decoration: none;">⬇ Download</a>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    function viewArtifact(artifactId) {
+      const url = `/api/artifacts/${artifactId}`;
+      window.open(url, '_blank');
+    }
+
+    function showStatus(message, type) {
+      const container = document.getElementById('statusContainer');
+      container.innerHTML = `<div class="status ${type}">${message}</div>`;
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+      event.target.classList.add('active');
+      document.getElementById(tabName).classList.add('active');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    updatePromptsList();
+  </script>
+</body>
+</html>
