@@ -1,11 +1,10 @@
 import express from 'express';
-import cors from 'cors';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
-import { spawn } from 'child_process';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
+import { spawn, execFileSync } from 'child_process';
 import { randomBytes } from 'crypto';
 
 dotenv.config();
@@ -13,9 +12,9 @@ dotenv.config();
 const app = express();
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-app.use(cors());
+// No CORS middleware and no form-encoded body parsing: other websites can't drive this
+// server from a visitor's browser (JSON POSTs from another origin fail the CORS preflight).
 app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb' }));
 app.use(express.static(join(__dirname, 'public')));
 
 const API_KEY = process.env.TEXT_MODEL_API_KEY;
@@ -32,7 +31,84 @@ if (!existsSync(ARTIFACTS_DIR)) {
   mkdirSync(ARTIFACTS_DIR, { recursive: true });
 }
 
-function runPythonEvaluation(prompts, responses, onProgress, customMetrics = []) {
+const CUSTOM_METRICS_FILE = join(__dirname, 'custom_metrics.json');
+const STATIC_CONCURRENCY = 3;
+
+// The server sends requests to whatever chatbot URL an evaluation names, so only
+// local hosts plus hosts explicitly listed in ALLOWED_EVAL_HOSTS may be targeted.
+const ALLOWED_EVAL_HOSTS = new Set([
+  'localhost', '127.0.0.1', '[::1]',
+  ...(process.env.ALLOWED_EVAL_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean),
+]);
+
+function endpointError(apiEndpoint) {
+  let url;
+  try {
+    url = new URL(apiEndpoint);
+  } catch {
+    return 'API endpoint must be a valid URL';
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    return 'API endpoint must use http or https';
+  }
+  if (!ALLOWED_EVAL_HOSTS.has(url.hostname.toLowerCase())) {
+    return `Host "${url.hostname}" is not in the allowlist. Add it to ALLOWED_EVAL_HOSTS in .env to evaluate it.`;
+  }
+  return null;
+}
+
+function loadSuites() {
+  const output = execFileSync('python3', [join(__dirname, 'deepeval', 'datasets', 'export_suites.py')], { encoding: 'utf8' });
+  return JSON.parse(output);
+}
+
+function readCustomMetricLibrary() {
+  if (!existsSync(CUSTOM_METRICS_FILE)) return [];
+  return JSON.parse(readFileSync(CUSTOM_METRICS_FILE, 'utf8'));
+}
+
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function askChatbot(apiEndpoint, history, prompt, systemPrompt) {
+  const startTime = Date.now();
+  try {
+    const response = await axios.post(apiEndpoint, {
+      messages: [...history, { role: 'user', content: prompt }],
+      systemPrompt,
+    }, { timeout: 120000, maxRedirects: 0 });
+    const answer = response.data?.message;
+    if (typeof answer !== 'string' || !answer.trim()) {
+      return { error: "Endpoint response did not contain a non-empty 'message' field", time: Date.now() - startTime };
+    }
+    return { answer, time: Date.now() - startTime };
+  } catch (error) {
+    return { error: error.response?.data?.error || error.message, time: Date.now() - startTime };
+  }
+}
+
+const BUILTIN_METRIC_KEYS = {
+  'Answer Relevancy': 'answer_relevancy',
+  'Faithfulness': 'faithfulness',
+  'Contextual Precision': 'contextual_precision',
+  'Contextual Recall': 'contextual_recall',
+  'Contextual Relevancy': 'contextual_relevancy',
+  'Hallucination': 'hallucination',
+  'Toxicity': 'toxicity',
+  'Summarization': 'summarization',
+};
+
+function runPythonEvaluation({ prompts, responses, customMetrics, selectedMetrics, systemPrompt, isolated, references }, onProgress) {
   return new Promise((resolve, reject) => {
     const python = spawn('python3', [join(__dirname, 'evaluate_responses.py')]);
     let stdout = '';
@@ -60,27 +136,34 @@ function runPythonEvaluation(prompts, responses, onProgress, customMetrics = [])
     });
 
     python.on('close', (code) => {
-      if (code !== 0) {
-        console.warn(`Python evaluation returned code ${code}:`, stderr);
-        resolve({ error: 'Evaluation metrics unavailable', metrics: {} });
+      let result;
+      try {
+        result = JSON.parse(stdout);
+      } catch (e) {
+        console.error(`Python evaluation exited ${code}; unparseable output:`, stderr);
+        reject(new Error('Quality metric evaluation failed (see server log)'));
         return;
       }
-
-      try {
-        const result = JSON.parse(stdout);
-        resolve(result);
-      } catch (e) {
-        console.error('Failed to parse Python output:', e, stdout);
-        resolve({ error: 'Failed to parse evaluation results', metrics: {} });
+      if (code !== 0 || result.error) {
+        reject(new Error(`Quality metric evaluation failed: ${result.error || `exit code ${code}`}`));
+        return;
       }
+      resolve(result);
     });
 
     python.on('error', (err) => {
-      console.warn('Python evaluation error:', err.message);
-      resolve({ error: 'Python evaluation not available', metrics: {} });
+      reject(new Error(`Could not start Python evaluator: ${err.message}`));
     });
 
-    python.stdin.write(JSON.stringify({ prompts, responses, custom_metrics: customMetrics }));
+    python.stdin.write(JSON.stringify({
+      prompts,
+      responses,
+      custom_metrics: customMetrics,
+      selected_metrics: selectedMetrics,
+      system_prompt: systemPrompt,
+      isolated,
+      references,
+    }));
     python.stdin.end();
   });
 }
@@ -201,15 +284,114 @@ app.post('/api/extract-metric-name', async (req, res) => {
   }
 });
 
+app.get('/api/suites', (_req, res) => {
+  try {
+    res.json(loadSuites().map(s => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      caseCount: s.cases.length,
+      categories: [...new Set(s.cases.map(c => c.category))],
+    })));
+  } catch (error) {
+    res.status(500).json({ error: `Could not load test suites: ${error.message}` });
+  }
+});
+
+app.get('/api/custom-metrics', (_req, res) => {
+  try {
+    res.json(readCustomMetricLibrary());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/custom-metrics', (req, res) => {
+  const name = String(req.body?.name || '').trim().slice(0, 60);
+  const desc = String(req.body?.desc || '').trim();
+  if (!desc || desc.length > 500) {
+    return res.status(400).json({ error: 'Metric description is required (max 500 characters)' });
+  }
+  // Validate params: array of strings, max 5, each max 200 chars
+  let params = [];
+  if (Array.isArray(req.body?.params)) {
+    params = req.body.params
+      .map(p => String(p || '').trim().slice(0, 200))
+      .filter(p => p.length > 0)
+      .slice(0, 5);
+  }
+  try {
+    const library = readCustomMetricLibrary();
+    if (library.length >= 50) {
+      return res.status(400).json({ error: 'The custom metric library is full (50 metrics)' });
+    }
+    const metric = {
+      id: `cm_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`,
+      name: name || 'Custom Metric',
+      desc,
+      params,
+      createdAt: new Date().toISOString(),
+    };
+    library.push(metric);
+    writeFileSync(CUSTOM_METRICS_FILE, JSON.stringify(library, null, 2));
+    res.status(201).json(metric);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/custom-metrics/:id', (req, res) => {
+  try {
+    const library = readCustomMetricLibrary();
+    const remaining = library.filter(m => m.id !== req.params.id);
+    if (remaining.length === library.length) {
+      return res.status(404).json({ error: 'Custom metric not found' });
+    }
+    writeFileSync(CUSTOM_METRICS_FILE, JSON.stringify(remaining, null, 2));
+    res.status(204).end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/deepeval', async (req, res) => {
-  const { apiEndpoint, testPrompts = [], evaluationMode = 'static', initialPrompt, numberOfTests = 5, evaluationCriteria = {}, selectedMetrics = {} } = req.body;
+  const { apiEndpoint, testPrompts = [], evaluationMode = 'static', suiteId, initialPrompt, numberOfTests = 5, evaluationCriteria = {}, selectedMetrics = {} } = req.body;
 
   if (!apiEndpoint) {
     return res.status(400).json({ error: 'API endpoint is required' });
   }
+  const badEndpoint = endpointError(apiEndpoint);
+  if (badEndpoint) {
+    return res.status(400).json({ error: badEndpoint });
+  }
+  if (!['static', 'dynamic', 'suite'].includes(evaluationMode)) {
+    return res.status(400).json({ error: `Unknown evaluation mode "${evaluationMode}"` });
+  }
 
-  // Stream real progress as Server-Sent Events instead of one blocking JSON response —
-  // the frontend previously had no way to know how far through the run the server was.
+  const builtinKeys = (selectedMetrics.builtin || Object.keys(BUILTIN_METRIC_KEYS))
+    .map(label => BUILTIN_METRIC_KEYS[label] || label)
+    .filter(key => Object.values(BUILTIN_METRIC_KEYS).includes(key));
+  const customMetricsList = (selectedMetrics.custom || []).filter(m => m && m.id && m.desc);
+  if (builtinKeys.length + customMetricsList.length === 0 && evaluationMode !== 'suite') {
+    return res.status(400).json({ error: 'Select at least one metric to evaluate' });
+  }
+  if (evaluationMode === 'dynamic' && !initialPrompt) {
+    return res.status(400).json({ error: 'An initial question is required for dynamic mode' });
+  }
+
+  let suite = null;
+  if (evaluationMode === 'suite') {
+    try {
+      suite = loadSuites().find(s => s.id === suiteId);
+    } catch (error) {
+      return res.status(500).json({ error: `Could not load test suites: ${error.message}` });
+    }
+    if (!suite) {
+      return res.status(400).json({ error: `Unknown test suite "${suiteId}"` });
+    }
+  }
+
+  // Stream real progress as Server-Sent Events so the dashboard can show per-step progress.
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -220,132 +402,147 @@ app.post('/api/deepeval', async (req, res) => {
   };
 
   try {
-    // Create timestamp-based ID for better readability
     const now = new Date();
     const timestamp = now.toISOString().replace(/[:.]/g, '-').split('T').join('_').substring(0, 19);
-    const conversationId = `eval_${timestamp}`;
+    // Random suffix keeps runs started in the same second from overwriting each other.
+    const conversationId = `eval_${timestamp}_${randomBytes(3).toString('hex')}`;
+    const systemPrompt = evaluationCriteria.systemPrompt || null;
+    const isolated = evaluationMode !== 'dynamic';
 
-    const conversations = [];
     const metrics = {
       totalMessages: 0,
       averageResponseTime: 0,
       responseTimes: [],
       prompts: [],
       responses: [],
+      references: null,
+      caseIds: null,
+      failedResponses: [],
       testCriteria: evaluationCriteria,
       timestamp: now.toISOString(),
-      apiEndpoint: apiEndpoint,
-      evaluationMode: evaluationMode,
+      apiEndpoint,
+      evaluationMode,
+      isolatedPrompts: isolated,
+      suiteId: suite?.id || null,
+      suiteName: suite?.name || null,
+      selectedBuiltinMetrics: builtinKeys,
+      customMetrics: customMetricsList,
+    };
+    const conversations = [];
+    const record = (i, prompt, result) => {
+      metrics.prompts[i] = prompt;
+      metrics.responseTimes[i] = result.time;
+      if (result.error) {
+        console.error(`Chatbot error on prompt ${i + 1}: ${result.error}`);
+        metrics.responses[i] = `Error: ${result.error}`;
+        metrics.failedResponses.push({ index: i, prompt, error: result.error });
+      } else {
+        metrics.responses[i] = result.answer;
+        metrics.totalMessages += 2;
+      }
     };
 
-    let promptsToEvaluate = [];
     sendEvent('progress', { percent: 10, message: 'Preparing test prompts...' });
 
     if (evaluationMode === 'dynamic') {
-      promptsToEvaluate = await generateDynamicPrompts(
-        apiEndpoint,
-        initialPrompt,
-        numberOfTests,
-        evaluationCriteria.systemPrompt,
-        conversations,
-        (done, total) => {
-          const percent = 10 + Math.round((done / total) * 30);
-          sendEvent('progress', { percent, message: `Generating conversation turn ${done}/${total}...` });
+      // One shared conversation: each follow-up builds on the previous answer, and each prompt is sent once.
+      const totalTurns = Math.max(1, numberOfTests);
+      let lastResponse = '';
+      for (let i = 0; i < totalTurns; i++) {
+        let prompt = initialPrompt;
+        if (i > 0) {
+          sendEvent('progress', { percent: 10 + Math.round((i / totalTurns) * 55), message: `Generating follow-up question ${i}/${totalTurns - 1}...` });
+          prompt = await generateFollowUpQuestion(initialPrompt, lastResponse);
         }
-      );
-    } else {
-      promptsToEvaluate = testPrompts.length > 0 ? testPrompts : [
-        'What is the capital of France?',
-        'Explain machine learning in simple terms',
-        'How do you make a cup of tea?',
-        'What are the benefits of exercise?',
-        'Tell me a short story',
-      ];
-    }
-
-    const totalPrompts = promptsToEvaluate.length;
-    for (let i = 0; i < promptsToEvaluate.length; i++) {
-      const prompt = promptsToEvaluate[i];
-      const startTime = Date.now();
-
-      try {
-        const response = await axios.post(apiEndpoint, {
-          messages: [
-            ...conversations,
-            { role: 'user', content: prompt }
-          ],
-          systemPrompt: evaluationCriteria.systemPrompt || null,
-        });
-
-        const endTime = Date.now();
-        const responseTime = endTime - startTime;
-
-        conversations.push(
-          { role: 'user', content: prompt },
-          { role: 'assistant', content: response.data.message }
-        );
-
-        metrics.totalMessages += 2;
-        metrics.responseTimes.push(responseTime);
-        metrics.prompts.push(prompt);
-        metrics.responses.push(response.data.message);
-      } catch (error) {
-        console.error(`Error evaluating prompt: ${prompt}`, error.message);
-        metrics.prompts.push(prompt);
-        metrics.responses.push(`Error: ${error.message}`);
-        metrics.responseTimes.push(Date.now() - startTime);
+        const result = await askChatbot(apiEndpoint, conversations, prompt, systemPrompt);
+        record(i, prompt, result);
+        if (!result.error) {
+          conversations.push({ role: 'user', content: prompt }, { role: 'assistant', content: result.answer });
+        }
+        lastResponse = result.answer || '';
+        sendEvent('progress', { percent: 10 + Math.round(((i + 1) / totalTurns) * 55), message: `Collected response ${i + 1}/${totalTurns}...` });
       }
-
-      const percent = 40 + Math.round(((i + 1) / totalPrompts) * 25);
-      sendEvent('progress', { percent, message: `Collected response ${i + 1}/${totalPrompts}...` });
+    } else {
+      // Static prompts and suite cases are independent tests: each gets a fresh conversation,
+      // so results don't depend on question order, and they run in parallel.
+      const cases = suite
+        ? suite.cases
+        : (testPrompts.length > 0 ? testPrompts : [
+          'What is the capital of France?',
+          'Explain machine learning in simple terms',
+          'How do you make a cup of tea?',
+          'What are the benefits of exercise?',
+          'Tell me a short story',
+        ]).map(prompt => ({ prompt }));
+      if (suite) {
+        metrics.references = cases.map(c => c.reference || null);
+        metrics.caseIds = cases.map(c => c.id);
+      }
+      let done = 0;
+      await mapWithConcurrency(cases, STATIC_CONCURRENCY, async (testCase, i) => {
+        const result = await askChatbot(apiEndpoint, [], testCase.prompt, systemPrompt);
+        record(i, testCase.prompt, result);
+        conversations[i] = result.error ? [] : [{ role: 'user', content: testCase.prompt }, { role: 'assistant', content: result.answer }];
+        done++;
+        sendEvent('progress', { percent: 10 + Math.round((done / cases.length) * 55), message: `Collected response ${done}/${cases.length}...` });
+      });
+      metrics.failedResponses.sort((a, b) => a.index - b.index);
     }
 
     metrics.averageResponseTime = metrics.responseTimes.length > 0
       ? Math.round(metrics.responseTimes.reduce((a, b) => a + b, 0) / metrics.responseTimes.length)
       : 0;
 
-    // Compute quality metrics using DeepEval
-    console.log('Computing quality metrics...');
-    sendEvent('progress', { percent: 65, message: 'Running quality metrics evaluation (14+ metrics per response)...' });
+    const failedIndices = new Set(metrics.failedResponses.map(f => f.index));
+    const evaluatedIndices = metrics.prompts.map((_, i) => i).filter(i => !failedIndices.has(i));
+    if (evaluatedIndices.length === 0) {
+      throw new Error(`The chatbot endpoint failed on all ${metrics.prompts.length} prompts: ${metrics.failedResponses[0].error}`);
+    }
 
-    const customMetricsList = selectedMetrics.custom || [];
-    console.log('🔍 Custom metrics being evaluated:', customMetricsList.length, 'metrics');
-    customMetricsList.forEach((m, i) => {
-      console.log(`  [${i}] ID: ${m.id}, Name: ${m.name}, Desc: ${m.desc}`);
-    });
+    const metricCount = builtinKeys.length + customMetricsList.length + (suite ? 1 : 0);
+    sendEvent('progress', { percent: 65, message: `Scoring ${evaluatedIndices.length} responses on ${metricCount} metrics...` });
 
-    const qualityMetrics = await runPythonEvaluation(
-      metrics.prompts,
-      metrics.responses,
-      (done, total) => {
-        const percent = 65 + Math.round((done / total) * 25);
-        sendEvent('progress', { percent, message: `Scoring response ${done}/${total}...` });
+    const quality = await runPythonEvaluation(
+      {
+        prompts: evaluatedIndices.map(i => metrics.prompts[i]),
+        responses: evaluatedIndices.map(i => metrics.responses[i]),
+        references: metrics.references ? evaluatedIndices.map(i => metrics.references[i]) : null,
+        customMetrics: customMetricsList,
+        selectedMetrics: builtinKeys,
+        systemPrompt,
+        isolated,
       },
-      customMetricsList
+      (done, total) => {
+        sendEvent('progress', { percent: 65 + Math.round((done / total) * 27), message: `Scored response ${done}/${total}...` });
+      }
     );
 
-    console.log('📊 Evaluation results keys:', Object.keys(qualityMetrics.aggregated_metrics || {}));
-
-    metrics.qualityMetrics = qualityMetrics.aggregated_metrics || {};
-    metrics.individualMetrics = qualityMetrics.individual_metrics || [];
-    metrics.passThreshold = qualityMetrics.pass_threshold ?? 0.75;
-    metrics.metricsPassed = qualityMetrics.metrics_passed ?? 0;
-    metrics.metricsTotal = qualityMetrics.metrics_total ?? 0;
-    metrics.overallPassRate = qualityMetrics.overall_pass_rate ?? 0;
-    metrics.overallPass = qualityMetrics.overall_pass ?? false;
+    metrics.qualityMetrics = quality.aggregated_metrics || {};
+    metrics.individualMetrics = quality.individual_metrics || [];
+    metrics.individualReasons = quality.individual_reasons || [];
+    metrics.judgeSamples = quality.judge_samples || [];
+    metrics.evaluatedIndices = evaluatedIndices;
+    metrics.unmeasuredMetrics = quality.unmeasured_metrics || [];
+    metrics.scoringMethod = quality.scoring_method;
+    metrics.judgeModel = quality.judge_model;
+    metrics.passThreshold = quality.pass_threshold ?? 0.75;
+    metrics.metricsPassed = quality.metrics_passed ?? 0;
+    metrics.metricsTotal = quality.metrics_total ?? 0;
+    metrics.overallPassRate = quality.overall_pass_rate ?? 0;
+    // A run where the chatbot failed to answer some prompts can't be an overall pass.
+    metrics.overallPass = Boolean(quality.overall_pass) && metrics.failedResponses.length === 0;
 
     sendEvent('progress', { percent: 92, message: 'Saving results...' });
 
     const evaluationData = {
       conversationId,
-      conversations,
+      conversations: isolated ? conversations.flat() : conversations,
       metrics,
       createdAt: now.toISOString(),
     };
 
     const artifactFilename = `${conversationId}.json`;
-    const artifactPath = join(ARTIFACTS_DIR, artifactFilename);
-    writeFileSync(artifactPath, JSON.stringify(evaluationData, null, 2));
+    writeFileSync(join(ARTIFACTS_DIR, artifactFilename), JSON.stringify(evaluationData, null, 2));
 
     sendEvent('complete', {
       success: true,
@@ -360,61 +557,6 @@ app.post('/api/deepeval', async (req, res) => {
     res.end();
   }
 });
-
-async function generateDynamicPrompts(apiEndpoint, initialPrompt, numberOfTests, systemPrompt, conversations, onProgress) {
-  const prompts = [initialPrompt];
-  let lastResponse = '';
-
-  try {
-    const initialResponse = await axios.post(apiEndpoint, {
-      messages: [
-        { role: 'user', content: initialPrompt }
-      ],
-      systemPrompt: systemPrompt || null,
-    });
-
-    lastResponse = initialResponse.data.message;
-    conversations.push(
-      { role: 'user', content: initialPrompt },
-      { role: 'assistant', content: lastResponse }
-    );
-    if (onProgress) onProgress(1, numberOfTests);
-
-    for (let i = 1; i < numberOfTests; i++) {
-      console.log(`Generating follow-up question ${i} of ${numberOfTests - 1}...`);
-      const followUpPrompt = await generateFollowUpQuestion(initialPrompt, lastResponse);
-      prompts.push(followUpPrompt);
-
-      try {
-        const followUpResponse = await axios.post(apiEndpoint, {
-          messages: [
-            ...conversations,
-            { role: 'user', content: followUpPrompt }
-          ],
-          systemPrompt: systemPrompt || null,
-        });
-
-        lastResponse = followUpResponse.data.message;
-        conversations.push(
-          { role: 'user', content: followUpPrompt },
-          { role: 'assistant', content: lastResponse }
-        );
-      } catch (error) {
-        console.error('Error in follow-up response:', error.message);
-        conversations.push(
-          { role: 'user', content: followUpPrompt },
-          { role: 'assistant', content: `Error: ${error.message}` }
-        );
-      }
-      if (onProgress) onProgress(i + 1, numberOfTests);
-    }
-  } catch (error) {
-    console.error('Error in dynamic prompt generation:', error.message);
-  }
-
-  console.log(`Total prompts generated: ${prompts.length} (requested: ${numberOfTests})`);
-  return prompts;
-}
 
 async function generateFollowUpQuestion(initialPrompt, previousResponse) {
   try {
@@ -442,22 +584,44 @@ async function generateFollowUpQuestion(initialPrompt, previousResponse) {
   }
 }
 
+function summarizeArtifact(filename) {
+  const data = JSON.parse(readFileSync(join(ARTIFACTS_DIR, filename), 'utf8'));
+  const m = data.metrics || {};
+  const quality = m.qualityMetrics || {};
+  const avgs = Object.values(quality).map(q => q.avg).filter(v => typeof v === 'number');
+  return {
+    id: filename.replace(/\.json$/, ''),
+    filename,
+    createdAt: data.createdAt,
+    evaluationMode: m.evaluationMode,
+    suiteId: m.suiteId || null,
+    apiEndpoint: m.apiEndpoint || null,
+    suiteName: m.suiteName || null,
+    totalPrompts: (m.prompts || []).length,
+    failedResponses: (m.failedResponses || []).length,
+    averageResponseTime: m.averageResponseTime || 0,
+    metricsPassed: m.metricsPassed ?? 0,
+    metricsTotal: m.metricsTotal ?? 0,
+    overallPassRate: m.overallPassRate ?? 0,
+    overallPass: Boolean(m.overallPass),
+    averageScore: avgs.length ? avgs.reduce((a, b) => a + b, 0) / avgs.length : null,
+    scoringMethod: m.scoringMethod || 'legacy',
+    scores: Object.fromEntries(Object.entries(quality).map(([k, q]) => [k, q.avg])),
+    customMetrics: (m.customMetrics || []).map(({ id, name, desc, params }) => ({ id, name, desc, params: params || [] })),
+  };
+}
+
 app.get('/api/artifacts', (_req, res) => {
   try {
-    const files = require('fs').readdirSync(ARTIFACTS_DIR);
-    const artifacts = files
-      .filter(f => f.endsWith('.json'))
-      .map(f => {
-        const data = JSON.parse(readFileSync(join(ARTIFACTS_DIR, f), 'utf8'));
-        return {
-          id: data.conversationId,
-          filename: f,
-          createdAt: data.createdAt,
-          metrics: data.metrics,
-        };
-      })
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
+    const artifacts = [];
+    for (const f of readdirSync(ARTIFACTS_DIR).filter(f => f.startsWith('eval_') && f.endsWith('.json'))) {
+      try {
+        artifacts.push(summarizeArtifact(f));
+      } catch (e) {
+        console.warn(`Skipping unreadable artifact ${f}: ${e.message}`);
+      }
+    }
+    artifacts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     res.json(artifacts);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -465,24 +629,27 @@ app.get('/api/artifacts', (_req, res) => {
 });
 
 app.get('/api/artifacts/:id', (req, res) => {
+  const { id } = req.params;
+  if (!/^eval_[A-Za-z0-9_-]+$/.test(id)) {
+    return res.status(400).json({ error: 'Invalid artifact id' });
+  }
+  const path = join(ARTIFACTS_DIR, `${id}.json`);
+  if (!existsSync(path)) {
+    return res.status(404).json({ error: 'Artifact not found' });
+  }
   try {
-    const files = require('fs').readdirSync(ARTIFACTS_DIR);
-    const file = files.find(f => f.includes(req.params.id));
-
-    if (!file) {
-      return res.status(404).json({ error: 'Artifact not found' });
-    }
-
-    const data = JSON.parse(readFileSync(join(ARTIFACTS_DIR, file), 'utf8'));
-    res.json(data);
+    res.json(JSON.parse(readFileSync(path, 'utf8')));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Chatbot server running on http://localhost:${PORT}`);
+// Localhost only by default; set HOST=0.0.0.0 to expose the server on the network.
+const HOST = process.env.HOST || '127.0.0.1';
+app.listen(PORT, HOST, () => {
+  console.log(`Chatbot server running on http://${HOST === '127.0.0.1' ? 'localhost' : HOST}:${PORT}`);
+  console.log(`Evaluation endpoint allowlist: ${[...ALLOWED_EVAL_HOSTS].join(', ')}`);
   console.log(`Using model: ${MODEL}`);
   console.log(`Artifacts stored in: ${ARTIFACTS_DIR}`);
 });

@@ -1,374 +1,70 @@
 # SimChat DeepEval Framework
 
-Production-grade AI chatbot evaluation system with isolated evaluation sessions and 15+ quality metrics.
+AI chatbot evaluation platform: a DeepSeek-backed chatbot plus a dashboard that runs multi-prompt evaluations and scores responses against built-in and custom quality metrics (uniform 75% pass bar).
 
----
-
-## 📁 Project Structure (Clean & Organized)
+## Project Structure
 
 ```
-project-root/
-│
-├── src/                          ⭐ MAIN SOURCE CODE
-│   ├── deepeval/                 Python evaluation framework
-│   │   ├── evaluation/
-│   │   │   ├── engine.py         IsolatedEvaluator class
-│   │   │   └── metrics.py        5 custom metrics
-│   │   ├── datasets/
-│   │   │   ├── golden/           Human-verified examples
-│   │   │   ├── synthetic/        Auto-generated edge cases
-│   │   │   └── test/             User-defined tests
-│   │   ├── tests/
-│   │   │   ├── conftest.py       Pytest fixtures
-│   │   │   ├── test_quality.py
-│   │   │   └── test_edge_cases.py
-│   │   ├── config/
-│   │   │   ├── qa.py             QA thresholds (70%+)
-│   │   │   └── prod.py           Prod thresholds (80%+)
-│   │   └── utils/
-│   ├── server/                   Node.js backend
-│   │   ├── server.js             Express API
-│   │   └── test-metrics.js       Integration tests
-│   └── public/                   Web UI frontend
-│       ├── index.html            Chat interface
-│       ├── deepeval.html         Evaluation dashboard
-│       └── styles/
-│
-├── docs/                         ⭐ ALL DOCUMENTATION (225+ pages)
-│   ├── QUICK_START.md            5-minute setup
-│   ├── CODEBASE_STRUCTURE.md     Technical guide (90+ pages)
-│   ├── AI_CHATBOT_EVOLUTION_PROPOSAL.md  Business case (50+ pages)
-│   ├── ARCHITECTURE_DIAGRAM.md   Visual diagrams
-│   ├── FRAMEWORK_SUMMARY.md      Overview
-│   ├── QUALITY_METRICS.md        Metric definitions
-│   ├── guides/                   How-to guides
-│   ├── api/                      API documentation
-│   └── architecture/             Technical deep dives
-│
-├── reports/                      ⭐ EVALUATION RESULTS & LOGS
-│   ├── runs/                     Individual evaluation runs (JSON)
-│   │   └── 2024-09-26_eval_001.json
-│   ├── custom/                   Custom report artifacts
-│   └── logs/                     Application logs
-│
-├── artifacts/                    ⭐ STORED ARTIFACTS
-│   └── (evaluation outputs, visualizations)
-│
-├── config/                       CONFIGURATION FILES
-│   ├── .env                      Environment variables
-│   └── .env.example              Example template
-│
-├── scripts/                      UTILITY SCRIPTS
-│   ├── setup.sh
-│   ├── run-tests.sh
-│   └── deploy.sh
-│
-├── tests/                        INTEGRATION TESTS
-│   ├── e2e/
-│   └── integration/
-│
-├── CLAUDE.md                     Project guide for Claude
-├── package.json                  Node.js dependencies
-├── requirements.txt              Python dependencies
-└── .gitignore
-```
-
----
-
-## 🎯 Key Points
-
-### Clear Separation of Concerns
-- **src/** — All source code (Python + Node.js)
-- **docs/** — All documentation in one place
-- **reports/** — Evaluation results and logs
-- **artifacts/** — Generated output files
-- **config/** — Configuration files
-
-### No Scattered Files
-- ✅ MD files NOT in root (they're in docs/)
-- ✅ Reports NOT in src/ (they're in reports/)
-- ✅ Code NOT mixed with docs
-- ✅ Config centralized in config/
-
----
-
-## 🚀 Quick Start
-
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-npm install
-
-# 2. Setup configuration
-cp config/.env.example config/.env
-
-# 3. Verify setup
-npm run verify
-
-# 4. Start server
-npm start
-
-# 5. Access dashboard
-# Chat: http://localhost:3000
-# Eval: http://localhost:3000/deepeval.html
-```
-
----
-
-## 📂 Folder Purposes
-
-### `src/` — SOURCE CODE (Keep organized by component)
-```
-All code organized by function, not by layer:
-- deepeval/      Evaluation framework
-- server/        Node.js backend
-- public/        Frontend UI
-- shared/        Shared utilities (expandable)
-```
-
-### `docs/` — DOCUMENTATION (All MD files here)
-```
-Organized by topic:
-- guides/        How-to guides
-- api/           API documentation
-- architecture/  Technical details
-- QUICK_START.md, CODEBASE_STRUCTURE.md, etc.
-```
-
-### `reports/` — RESULTS & LOGS (Outputs only, not code)
-```
-- runs/          Evaluation results (JSON files)
-- custom/        Custom report artifacts
-- logs/          Application logs
-```
-
-### `artifacts/` — GENERATED FILES (User-created outputs)
-```
-- Visualizations
-- Exports
-- Custom outputs
-```
-
-### `config/` — CONFIGURATION (Environment & setup)
-```
-- .env           Environment variables
-- .env.example   Template/example
-- config.yml     Config file (if needed)
-```
-
----
-
-## 📊 Navigation Guide
-
-**Where is each component?**
-
-| What | Location |
-|------|----------|
-| **Main evaluation code** | `src/deepeval/evaluation/engine.py` |
-| **Custom metrics** | `src/deepeval/evaluation/metrics.py` |
-| **Golden test data** | `src/deepeval/datasets/golden/` |
-| **API server** | `src/server/server.js` |
-| **Web UI** | `src/public/index.html` + `deepeval.html` |
-| **Setup guide** | `docs/QUICK_START.md` |
-| **Technical guide** | `docs/CODEBASE_STRUCTURE.md` |
-| **Business case** | `docs/AI_CHATBOT_EVOLUTION_PROPOSAL.md` |
-| **Architecture** | `docs/ARCHITECTURE_DIAGRAM.md` |
-| **Evaluation results** | `reports/runs/*.json` |
-| **Application logs** | `reports/logs/` |
-| **Environment vars** | `config/.env` |
-
----
-
-## 📚 Documentation Organization
-
-All markdown files are in `docs/`:
-
-```
-docs/
-├── QUICK_START.md                  ← Start here! (5 min)
-├── CODEBASE_STRUCTURE.md           ← Technical guide (90+ pages)
-├── AI_CHATBOT_EVOLUTION_PROPOSAL.md← Business context (50+ pages)
-├── ARCHITECTURE_DIAGRAM.md         ← Visual design
-├── FRAMEWORK_SUMMARY.md            ← Overview
-├── QUALITY_METRICS.md              ← Metric definitions
-├── guides/
-│   ├── adding-custom-metrics.md
-│   ├── adding-datasets.md
-│   └── integration-guide.md
-├── api/
-│   ├── evaluation-api.md
-│   └── config-reference.md
-└── architecture/
-    ├── isolated-sessions.md
-    └── metrics-system.md
-```
-
----
-
-## 🧪 Running Tests
-
-```bash
-# Run all tests
-pytest src/deepeval/tests/ -v
-
-# Run golden dataset tests
-pytest src/deepeval/tests/test_quality.py -v
-
-# Run edge case tests
-pytest src/deepeval/tests/test_edge_cases.py -v
-
-# Run with specific marker
-pytest -m golden     # Golden tests
-pytest -m synthetic  # Synthetic tests
-```
-
----
-
-## 🔧 Common Tasks
-
-### View evaluation results
-```bash
-# Check the latest results
-ls -la reports/runs/
-cat reports/runs/latest.json
-```
-
-### Check logs
-```bash
-tail -f reports/logs/app.log
-```
-
-### Add new golden example
-1. Edit: `src/deepeval/datasets/golden/quality_qa_set.py`
-2. Add Q&A to list
-3. Test: `pytest src/deepeval/tests/test_quality.py -v`
-
-### Change QA thresholds
-1. Edit: `src/deepeval/config/qa.py`
-2. Update `METRIC_THRESHOLDS`
-3. Run tests to verify
-
-### Change Production thresholds
-1. Edit: `src/deepeval/config/prod.py`
-2. Update `METRIC_THRESHOLDS`
-3. Run production tests
-
----
-
-## 📋 Before & After Comparison
-
-### ❌ BEFORE (Messy)
-```
-/Chatbot testing/
-├── deepeval/                 Mixed with other stuff
+.
+├── server.js               Express server (npm start) — chat API + evaluation API (SSE)
+├── evaluate_responses.py   Live evaluation engine, spawned by server.js per run
+├── eval-cli.mjs            CLI evaluation + regression gate for CI (npm run eval)
+├── test-metrics.js         Python ↔ Node integration check (npm run test:metrics)
+├── verify-setup.sh         Environment check (npm run verify)
 ├── public/
-├── *.md files scattered everywhere
-├── server.js at root
-├── *.py files scattered
-└── node_modules/
+│   ├── index.html          Chat UI
+│   └── deepeval.html       Evaluation dashboard (metrics, charts, PDF/JSON export)
+├── deepeval/               Target-architecture framework (IsolatedEvaluator, configs,
+│                           datasets) — not yet wired into server.js
+├── artifacts/              Saved evaluation runs (eval_*.json)
+├── docs/                   Architecture, metrics and business documentation
+└── reports/                Written analysis reports
 ```
 
-### ✅ AFTER (Clean)
-```
-/Chatbot testing/
-├── src/deepeval/             All code organized
-├── src/server/
-├── src/public/
-├── docs/                     All documentation
-├── reports/                  All results
-├── artifacts/                All outputs
-├── config/                   All configuration
-└── scripts/                  All utilities
+## Run
+
+```bash
+npm install
+pip install -r requirements.txt   # optional; heuristic metrics are used if unavailable
+npm start                          # http://localhost:3000  (dashboard: /deepeval.html)
 ```
 
----
+`.env` needs `TEXT_MODEL_API_KEY`, `TEXT_MODEL_BASE_URL`, `TEXT_MODEL`. Optional:
 
-## 🎯 Benefits of New Structure
+| Variable | Purpose |
+|---|---|
+| `PORT` / `HOST` | Listen address (default `127.0.0.1:3000`; set `HOST=0.0.0.0` to expose on the network) |
+| `ALLOWED_EVAL_HOSTS` | Comma-separated chatbot hosts evaluations may target besides localhost |
+| `JUDGE_MODEL`, `JUDGE_API_KEY`, `JUDGE_BASE_URL` | Score with a different model/provider than the chatbot (recommended: avoids self-grading bias) |
 
-| Benefit | Before | After |
-|---------|--------|-------|
-| **Find code** | Scattered | `src/` - one place |
-| **Find docs** | All over root | `docs/` - organized |
-| **Find reports** | No dedicated folder | `reports/` - centralized |
-| **Find config** | Hardcoded/root | `config/` - managed |
-| **Add new feature** | Unclear where | Clear folder structure |
-| **Onboard new dev** | Confusing | Easy to navigate |
-| **Scale project** | Gets messier | Remains organized |
+## Evaluation modes
 
----
+- **Dynamic** — one conversation; AI-generated follow-ups probe consistency.
+- **Static** — your prompts, each in its own conversation, sent 3 at a time.
+- **Test Suite** — fixed cases from `deepeval/datasets/` (`golden`, `edge_cases`), each also scored on **Reference Match** against its expected answer. Use suites for run-to-run comparisons.
 
-## 📖 Reading Guide
+Scoring: each response is judged in its own stateless API call; scores within 10 points of the 75% bar are judged 3 times and the median is used. Custom metrics are saved server-side in `custom_metrics.json`.
 
-**Choose based on your need:**
+## CI regression gate
 
-1. **"I want to get started NOW"**
-   → Read: `docs/QUICK_START.md` (10 min)
+```bash
+npm run eval -- --suite golden --start-server          # exit 0 pass, 1 gate failed, 2 error
+npm run eval -- --help                                 # all options
+```
 
-2. **"I need complete technical understanding"**
-   → Read: `docs/CODEBASE_STRUCTURE.md` (90+ pages)
+Fails when any metric is below 75%, any chatbot call fails, or a metric drops more than `--max-drop` points (default 10) versus the last run of the same endpoint and suite.
 
-3. **"Show me how this works visually"**
-   → Read: `docs/ARCHITECTURE_DIAGRAM.md` (20 pages)
+## API
 
-4. **"I need to understand the business value"**
-   → Read: `docs/AI_CHATBOT_EVOLUTION_PROPOSAL.md` (50+ pages)
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/chat` | Send a message to the chatbot |
+| GET | `/api/health` | Health check |
+| POST | `/api/generate-question` | Generate an initial test question from a system prompt |
+| POST | `/api/extract-metric-name` | Name a custom metric from its description |
+| POST | `/api/deepeval` | Run an evaluation (Server-Sent Events: `progress` → `complete` / `error`) |
+| GET | `/api/artifacts`, `/api/artifacts/:id` | List / fetch saved runs |
+| GET | `/api/suites` | List fixed test suites |
+| GET / POST / DELETE | `/api/custom-metrics[/:id]` | Saved custom metric library |
 
-5. **"I need a quick reference"**
-   → Read: `docs/QUICK_REFERENCE.md`
-
-6. **"I want to understand the project guide"**
-   → Read: `CLAUDE.md`
-
----
-
-## ✅ Verification Checklist
-
-- [x] All code in `src/`
-- [x] All docs in `docs/`
-- [x] All reports in `reports/`
-- [x] All artifacts in `artifacts/`
-- [x] All config in `config/`
-- [x] Clear folder purposes
-- [x] No scattered files
-- [x] Professional structure
-- [x] Easy to navigate
-- [x] Scalable layout
-
----
-
-## 🎯 Structure Highlights
-
-### ✨ Professional Organization
-- **src/** — Organized by component, not by layer
-- **docs/** — Hierarchical documentation
-- **reports/** — Time-stamped results
-- **artifacts/** — Generated outputs
-- **config/** — Environment management
-
-### ✨ Clear Separation
-- Code ≠ Documentation
-- Source ≠ Results
-- Configuration ≠ Code
-- Logs ≠ Reports
-
-### ✨ Enterprise Ready
-- Scalable structure
-- Easy to find things
-- Professional layout
-- Industry standard
-
----
-
-## 🚀 Next Steps
-
-1. ✅ Understand the structure (this file)
-2. → Read `docs/QUICK_START.md` to get running
-3. → Read `docs/CODEBASE_STRUCTURE.md` for technical details
-4. → Explore `src/deepeval/` to understand code
-5. → Check `reports/runs/` for evaluation results
-
----
-
-**Status:** ✅ Clean, Professional, Production-Ready  
-**Version:** 1.0.0  
-**Last Updated:** September 26, 2024
+See [CLAUDE.md](CLAUDE.md) for architecture rules and [docs/](docs/) for deeper documentation.

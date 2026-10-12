@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DeepEval Dashboard</title>
+  <link rel="icon" href="data:,">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
@@ -626,10 +627,27 @@
             <label for="customMetricInput">Add Custom Metric (Optional)</label>
             <textarea
               id="customMetricInput"
-              placeholder="E.g., 'Response length 50-500 words' or 'Must cite sources'"
-              style="min-height: 60px; font-size: 13px; border: 1px solid #c5d9f1; background: white;"
+              placeholder="E.g., 'Response should be in simple English language'"
+              style="min-height: 50px; font-size: 13px; border: 1px solid #c5d9f1; background: white;"
             ></textarea>
-            <button onclick="addCustomMetric()" style="width: 100%; margin-top: 8px;">➕ Add Metric</button>
+
+            <!-- Parameters Section -->
+            <div style="margin-top: 10px; background: #fff; border: 1px solid #d0e3f7; border-radius: 6px; padding: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <label style="font-size: 12px; font-weight: 600; color: #555; margin: 0;">📝 Evaluation Parameters <span style="font-weight:400;color:#999;">(describe how to judge — max 5)</span></label>
+                <span id="paramCounter" style="font-size: 11px; color: #999;">0 / 5</span>
+              </div>
+              <div id="paramInputList"></div>
+              <button type="button" onclick="addParamField()" id="addParamBtn"
+                style="width: 100%; margin-top: 6px; background: #e3f2fd; color: #1565c0; border: 1px dashed #90caf9; font-size: 12px; padding: 7px;">
+                + Add Parameter
+              </button>
+              <p style="font-size: 11px; color: #888; margin: 6px 0 0 0; line-height: 1.4;">
+                💡 Example: "No complex terminology", "Avoid passive voice", "Use short sentences"
+              </p>
+            </div>
+
+            <button onclick="addCustomMetric()" style="width: 100%; margin-top: 10px;">➕ Add Metric</button>
           </div>
 
           <!-- Unified Metrics List -->
@@ -658,7 +676,19 @@
           <select id="evaluationMode" onchange="updateModeUI()">
             <option value="dynamic">🤖 Dynamic (AI-Generated Follow-ups)</option>
             <option value="static">📝 Static (Predefined Questions)</option>
+            <option value="suite">📚 Test Suite (Fixed Cases + Expected Answers)</option>
           </select>
+        </div>
+
+        <div id="suiteModeUI" style="display: none;">
+          <div class="form-group">
+            <label for="suiteSelect">Test Suite *</label>
+            <select id="suiteSelect" onchange="updateSuiteInfo()"></select>
+          </div>
+          <p id="suiteInfo" style="font-size: 12px; color: #666; margin-bottom: 16px;"></p>
+          <p style="font-size: 12px; color: #666; margin-bottom: 16px;">
+            ℹ️ Every case runs in its own conversation and is also scored on <strong>Reference Match</strong> against its expected answer, so runs of the same suite are directly comparable.
+          </p>
         </div>
 
         <div id="dynamicModeUI">
@@ -750,6 +780,7 @@
             <div class="quality-metrics-grid" id="qualityMetricsGrid"></div>
           </div>
           <div class="charts-grid" id="qualityChartsGrid"></div>
+          <div id="responseBreakdown" style="margin-top: 24px;"></div>
         </div>
 
         <div id="analysis" class="tab-content">
@@ -819,6 +850,11 @@
           </div>
 
           <h3 style="margin-bottom: 16px; color: #333;">📁 Evaluation History</h3>
+          <div id="runComparison"></div>
+          <div id="historyTrend" class="chart-container" style="display:none;margin-top:16px;">
+            <h3>📈 Quality Trend (last 15 runs)</h3>
+            <div class="chart-wrapper"><canvas id="historyTrendChart"></canvas></div>
+          </div>
           <div id="artifactsList" class="artifacts-list"></div>
         </div>
       </div>
@@ -854,9 +890,77 @@
       custom: new Set()
     };
 
+    // === PARAMETER INPUT MANAGEMENT ===
+    const MAX_PARAMS = 5;
+    const MAX_PARAM_LENGTH = 200;
+
+    function getParamValues() {
+      return Array.from(document.querySelectorAll('#paramInputList input[data-param]'))
+        .map(el => el.value.trim())
+        .filter(v => v.length > 0);
+    }
+
+    function updateParamCounter() {
+      const count = document.querySelectorAll('#paramInputList input[data-param]').length;
+      const counter = document.getElementById('paramCounter');
+      if (counter) counter.textContent = `${count} / ${MAX_PARAMS}`;
+      const btn = document.getElementById('addParamBtn');
+      if (btn) btn.style.display = count >= MAX_PARAMS ? 'none' : '';
+    }
+
+    function addParamField(value) {
+      const list = document.getElementById('paramInputList');
+      if (!list) return;
+      const count = list.querySelectorAll('input[data-param]').length;
+      if (count >= MAX_PARAMS) {
+        showStatus(`Maximum ${MAX_PARAMS} parameters allowed per metric`, 'error');
+        return;
+      }
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+      row.innerHTML = `
+        <span style="color:#1565c0;font-size:12px;font-weight:600;min-width:18px;">${count + 1}.</span>
+        <input data-param type="text" maxlength="${MAX_PARAM_LENGTH}"
+          value="${value ? escapeHtml(value) : ''}"
+          placeholder="e.g., No complex terminology"
+          style="flex:1;padding:7px 10px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fafafa;">
+        <button type="button" onclick="removeParamField(this)"
+          style="width:auto;background:none;color:#c62828;padding:2px 6px;font-size:16px;box-shadow:none;min-width:28px;">✕</button>
+      `;
+      list.appendChild(row);
+      updateParamCounter();
+      if (!value) row.querySelector('input').focus();
+    }
+
+    function removeParamField(btn) {
+      const row = btn.parentElement;
+      row.remove();
+      // Re-number remaining rows
+      document.querySelectorAll('#paramInputList > div').forEach((div, i) => {
+        const numSpan = div.querySelector('span');
+        if (numSpan) numSpan.textContent = `${i + 1}.`;
+      });
+      updateParamCounter();
+    }
+
+    function clearParamFields() {
+      const list = document.getElementById('paramInputList');
+      if (list) list.innerHTML = '';
+      updateParamCounter();
+    }
+
     // Initialize metrics UI on page load
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
       renderMetricsUI();
+      await Promise.all([loadCustomMetricLibrary(), loadSuites()]);
+      try {
+        const res = await fetch('/api/artifacts');
+        const runs = res.ok ? await res.json() : [];
+        const latest = runs.find(r => r.scoringMethod !== 'legacy');
+        if (latest) await loadRun(latest.id);
+      } catch (e) {
+        console.warn('Could not load previous evaluations:', e);
+      }
     });
 
     function renderMetricsUI() {
@@ -881,12 +985,18 @@
       // Custom metrics - same format as built-in
       customMetrics.forEach(m => {
         const checked = selectedMetrics.custom.has(m.id) ? 'checked' : '';
+        const paramCount = (m.params && m.params.length) || 0;
+        const tooltipLines = [m.desc];
+        if (m.params && m.params.length) tooltipLines.push('Parameters: ' + m.params.join(' | '));
         html += `
-          <label style="display:flex;align-items:center;padding:10px;margin-bottom:6px;border-radius:6px;cursor:pointer;background:#f5f5f5;border:1px solid #ddd;transition:0.2s;" title="${escapeHtml(m.desc)}">
+          <label style="display:flex;align-items:center;padding:10px;margin-bottom:6px;border-radius:6px;cursor:pointer;background:#f5f5f5;border:1px solid #ddd;transition:0.2s;" title="${escapeHtml(tooltipLines.join('\n'))}">
             <input type="checkbox" ${checked}
               onchange="toggleCustomMetric('${m.id}', this.checked)"
               style="margin-right:10px;cursor:pointer;accent-color:#ff9800;width:18px;height:18px;">
-            <span style="font-size:13px;color:#333;user-select:none;">✓ 🎯 ${escapeHtml(m.name)}</span>
+            <span style="font-size:13px;color:#333;user-select:none;flex:1;">✓ 🎯 ${escapeHtml(m.name)}${paramCount ? ' <span style="font-size:11px;color:#999;">(' + paramCount + ' params)</span>' : ''}</span>
+            <button type="button" onclick="event.preventDefault(); event.stopPropagation(); if (confirm('Delete saved metric &quot;' + this.dataset.name + '&quot;?')) removeCustomMetric('${m.id}');"
+              data-name="${escapeHtml(m.name)}" title="Delete this saved metric"
+              style="width:auto;flex:none;background:none;color:#c62828;padding:2px 8px;font-size:14px;box-shadow:none;">✕</button>
           </label>
         `;
       });
@@ -1016,6 +1126,12 @@
         return;
       }
 
+      const params = getParamValues();
+      if (params.length === 0) {
+        showStatus('Please add at least one evaluation parameter that describes how to judge this metric', 'error');
+        return;
+      }
+
       if (customMetrics.length >= 20) {
         showStatus('Maximum 20 custom metrics allowed', 'error');
         return;
@@ -1039,26 +1155,51 @@
         const data = await response.json();
         const name = data.metricName || extractMetricName(desc);
 
-        const id = 'custom_' + Date.now();
-        customMetrics.push({ id, name, desc, ts: new Date().toLocaleString() });
-        selectedMetrics.custom.add(id);
+        const saveRes = await fetch('/api/custom-metrics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, desc, params })
+        });
+        const saved = await saveRes.json();
+        if (!saveRes.ok) throw new Error(saved.error || 'Failed to save metric');
+
+        customMetrics.push(saved);
+        selectedMetrics.custom.add(saved.id);
         input.value = '';
+        clearParamFields();
         renderMetricsUI();
         updateCustomMetricsList();
-        showStatus('✅ Custom metric added: "' + name + '"', 'success');
+        showStatus('✅ Custom metric saved: "' + escapeHtml(name) + '" with ' + params.length + ' parameter(s)', 'success');
       } catch (error) {
         console.error('Error:', error);
-        showStatus('Failed to extract metric name', 'error');
+        showStatus('❌ Could not add custom metric: ' + escapeHtml(error.message), 'error');
       } finally {
         if (button) button.disabled = false;
       }
     }
 
-    function removeCustomMetric(id) {
+    async function removeCustomMetric(id) {
+      const res = await fetch(`/api/custom-metrics/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 404) {
+        showStatus('❌ Could not delete custom metric', 'error');
+        return;
+      }
       customMetrics = customMetrics.filter(m => m.id !== id);
       selectedMetrics.custom.delete(id);
       renderMetricsUI();
       updateCustomMetricsList();
+    }
+
+    async function loadCustomMetricLibrary() {
+      try {
+        const res = await fetch('/api/custom-metrics');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        customMetrics = await res.json();
+        customMetrics.forEach(m => selectedMetrics.custom.add(m.id));
+        renderMetricsUI();
+      } catch (e) {
+        console.warn('Could not load saved custom metrics:', e);
+      }
     }
 
     function updateCustomMetricsList() {
@@ -1073,17 +1214,24 @@
         return;
       }
 
-      list.innerHTML = customMetrics.map(metric => `
+      list.innerHTML = customMetrics.map(metric => {
+        const paramsList = (metric.params && metric.params.length)
+          ? `<div style="margin-top:6px;padding:6px 8px;background:#f5f5f5;border-radius:4px;">
+              <div style="font-size:11px;color:#888;font-weight:600;margin-bottom:4px;">📝 Parameters (${metric.params.length}):</div>
+              ${metric.params.map((p, i) => `<div style="font-size:11px;color:#555;padding:2px 0;"><span style="color:#1565c0;font-weight:600;">${i+1}.</span> ${escapeHtml(p)}</div>`).join('')}
+            </div>`
+          : '';
+        return `
         <div style="background: white; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-start;">
           <div style="flex:1;">
             <div style="font-weight: 600; color: #333; margin-bottom: 4px;">🎯 ${escapeHtml(metric.name)}</div>
             <div style="font-size: 12px; color: #666;">${escapeHtml(metric.desc)}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Added: ${metric.ts}</div>
+            ${paramsList}
           </div>
           <button type="button" onclick="removeCustomMetric('${metric.id}'); return false;"
             style="background: #f44336; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px; white-space: nowrap; margin-left: 12px;">Remove</button>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
     }
 
     function proceedToMetricsSelection() {
@@ -1167,29 +1315,29 @@
 
     function generatePDFReportInternal() {
       const ev = currentEvaluation;
-        const metrics = ev ? ev.metrics : null;
-        const qualityMetrics = metrics ? (metrics.qualityMetrics || {}) : {};
-        const timestamp = new Date().toLocaleString();
-        const evalTimestamp = metrics ? new Date(metrics.timestamp).toLocaleString() : 'N/A';
+      if (!ev || !ev.metrics) {
+        showStatus('❌ Run an evaluation (or load one from Evaluation History) before downloading the report.', 'error');
+        return;
+      }
+      const metrics = ev.metrics;
+      const qualityMetrics = metrics.qualityMetrics || {};
+      const timestamp = new Date().toLocaleString();
+      const evalTimestamp = new Date(metrics.timestamp).toLocaleString();
+      const runCustomMetrics = metrics.customMetrics || customMetrics;
+      const scoringLabel = scoringMethodLabel(metrics);
 
-      const metricLabelsMap = {
-        'answer_relevancy': 'Answer Relevancy', 'faithfulness': 'Faithfulness',
-        'contextual_precision': 'Contextual Precision', 'contextual_recall': 'Contextual Recall',
-        'contextual_relevancy': 'Contextual Relevancy', 'hallucination': 'Hallucination',
-        'toxicity': 'Toxicity', 'summarization': 'Summarization',
-        'response_length': 'Response Length', 'completeness': 'Completeness', 'clarity': 'Clarity'
-      };
-
-      // Build metric rows for the report
       const builtinRows = Object.entries(qualityMetrics)
         .filter(([k]) => !k.startsWith('custom_'))
         .map(([k, d]) => {
-          const label = metricLabelsMap[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const label = metricLabel(k, metrics);
           const pct = Math.round(d.avg * 100);
           const passed = d.passed;
           const bar = `<div style="background:#e0e0e0;border-radius:4px;height:8px;width:100%;margin:4px 0;"><div style="background:${passed?'#4caf50':'#f44336'};height:8px;border-radius:4px;width:${pct}%;"></div></div>`;
           return `<tr style="border-bottom:1px solid #f0f0f0;">
-            <td style="padding:10px 12px;font-weight:600;color:#333;">${label}</td>
+            <td style="padding:10px 12px;">
+              <div style="font-weight:600;color:#333;">${escapeHtml(label)}</div>
+              ${d.worst_reason ? `<div style="font-size:11px;color:#888;margin-top:2px;">Lowest score: ${escapeHtml(d.worst_reason)}</div>` : ''}
+            </td>
             <td style="padding:10px 12px;text-align:center;font-size:18px;font-weight:700;color:${passed?'#2e7d32':'#c62828'};">${pct}%</td>
             <td style="padding:10px 12px;text-align:center;">
               <span style="background:${passed?'#e8f5e9':'#ffebee'};color:${passed?'#2e7d32':'#c62828'};padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">${passed?'PASS':'FAIL'}</span>
@@ -1202,9 +1350,12 @@
         .filter(([k]) => k.startsWith('custom_'))
         .map(([k, d]) => {
           const metricId = k.replace('custom_', '');
-          const cm = customMetrics.find(m => m.id === metricId);
+          const cm = runCustomMetrics.find(m => m.id === metricId);
           const label = cm ? cm.name : k;
-          const desc = cm ? cm.desc : '';
+          const paramsHtml = (cm && cm.params && cm.params.length)
+            ? `<div style="margin-top:4px;font-size:11px;color:#777;">${cm.params.map((p, i) => `<span style="display:inline-block;background:#fff3e0;border:1px solid #ffe0b2;border-radius:3px;padding:1px 6px;margin:2px 2px 0 0;">${i+1}. ${escapeHtml(p)}</span>`).join('')}</div>`
+            : '';
+          const desc = (cm ? cm.desc : '') + (d.worst_reason ? ` — Lowest score: ${d.worst_reason}` : '');
           const pct = Math.round(d.avg * 100);
           const passed = d.passed;
           const bar = `<div style="background:#e0e0e0;border-radius:4px;height:8px;width:100%;margin:4px 0;"><div style="background:${passed?'#4caf50':'#f44336'};height:8px;border-radius:4px;width:${pct}%;"></div></div>`;
@@ -1212,6 +1363,7 @@
             <td style="padding:10px 12px;">
               <div style="font-weight:600;color:#e65100;">🎯 ${escapeHtml(label)}</div>
               <div style="font-size:11px;color:#999;margin-top:2px;">${escapeHtml(desc)}</div>
+              ${paramsHtml}
             </td>
             <td style="padding:10px 12px;text-align:center;font-size:18px;font-weight:700;color:${passed?'#2e7d32':'#c62828'};">${pct}%</td>
             <td style="padding:10px 12px;text-align:center;">
@@ -1254,7 +1406,7 @@
           <div style="margin-top:36px;display:flex;gap:40px;">
             <div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;">Generated</div><div style="font-size:14px;font-weight:600;">${timestamp}</div></div>
             <div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;">Evaluation Run</div><div style="font-size:14px;font-weight:600;">${evalTimestamp}</div></div>
-            ${metrics ? `<div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;">Mode</div><div style="font-size:14px;font-weight:600;">${metrics.evaluationMode === 'dynamic' ? 'Dynamic' : 'Static'}</div></div>` : ''}
+            ${metrics ? `<div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;">Mode</div><div style="font-size:14px;font-weight:600;">${metrics.evaluationMode === 'dynamic' ? 'Dynamic' : metrics.evaluationMode === 'suite' ? 'Test Suite' : 'Static'}</div></div>` : ''}
           </div>
         </div>
 
@@ -1266,7 +1418,7 @@
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;">
               <div style="background:${overallPass?'#e8f5e9':'#fff3e0'};border:1px solid ${overallPass?'#c8e6c9':'#ffe0b2'};border-radius:10px;padding:18px;text-align:center;">
                 <div style="font-size:30px;font-weight:700;color:${overallPass?'#2e7d32':'#e65100'};">${overallPassRate}%</div>
-                <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:4px;">Overall Score</div>
+                <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:4px;">Metrics Pass Rate</div>
               </div>
               <div style="background:#f3f4ff;border:1px solid #c5cae9;border-radius:10px;padding:18px;text-align:center;">
                 <div style="font-size:30px;font-weight:700;color:#3949ab;">${metricsPassed}/${metricsTotal}</div>
@@ -1293,10 +1445,12 @@
             <h2 style="font-size:20px;color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;margin-bottom:20px;">Evaluation Configuration</h2>
             <table style="width:100%;border-collapse:collapse;font-size:14px;">
               <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;width:35%;border:1px solid #e0e0e0;">API Endpoint</td><td style="padding:10px 14px;border:1px solid #e0e0e0;word-break:break-all;">${escapeHtml(metrics.apiEndpoint || 'N/A')}</td></tr>
-              <tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Evaluation Mode</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${metrics.evaluationMode === 'dynamic' ? '🤖 Dynamic (AI-Generated Conversations)' : '📝 Static (Predefined Prompts)'}</td></tr>
+              <tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Evaluation Mode</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${metrics.evaluationMode === 'dynamic' ? '🤖 Dynamic (AI-Generated Conversations)' : metrics.evaluationMode === 'suite' ? '📚 Test Suite: ' + escapeHtml(metrics.suiteName || '') : '📝 Static (Predefined Prompts)'}</td></tr>
               <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Pass Threshold</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">75% (uniform across all metrics)</td></tr>
               <tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Total Messages</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${metrics.totalMessages}</td></tr>
-              <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Custom Metrics</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${customMetrics.length > 0 ? customMetrics.map(m => m.name).join(', ') : 'None'}</td></tr>
+              <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Custom Metrics</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${runCustomMetrics.length > 0 ? runCustomMetrics.map(m => escapeHtml(m.name)).join(', ') : 'None'}</td></tr>
+              <tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Scoring Method</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${escapeHtml(scoringLabel)}</td></tr>
+              <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:600;border:1px solid #e0e0e0;">Failed Responses</td><td style="padding:10px 14px;border:1px solid #e0e0e0;">${(metrics.failedResponses || []).length} of ${(metrics.prompts || []).length} (excluded from scoring)</td></tr>
             </table>
           </div>
           ` : ''}
@@ -1348,7 +1502,7 @@
           <!-- FOOTER -->
           <div style="margin-top:48px;padding-top:20px;border-top:2px solid #e0e0e0;text-align:center;color:#aaa;font-size:11px;">
             <p style="margin:4px 0;font-weight:600;color:#999;">DeepEval Framework v1.1.0 · SimChat AI Evaluation Platform</p>
-            <p style="margin:4px 0;">© 2026 SimForm Solutions. All rights reserved. This report is confidential and intended for authorized use only.</p>
+            <p style="margin:4px 0;">© 2026 Dhruv Songara. All rights reserved. This report is confidential and intended for authorized use only.</p>
             <p style="margin:4px 0;">Report generated: ${timestamp}</p>
           </div>
 
@@ -1359,7 +1513,9 @@
         margin: [0, 0, 0, 0],
         filename: `deepeval-report-${new Date().toISOString().slice(0,10)}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
+        // scrollX/scrollY 0: otherwise html2canvas offsets the capture by the page's scroll position.
+        html2canvas: { scale: 2, useCORS: true, logging: false, scrollX: 0, scrollY: 0 },
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'h2'] },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       };
 
@@ -1384,24 +1540,28 @@
     }
 
     function exportMetricsJSON() {
-      const selectedData = getSelectedMetrics();
+      if (!currentEvaluation || !currentEvaluation.metrics) {
+        showStatus('❌ Run an evaluation (or load one from Evaluation History) before exporting.', 'error');
+        return;
+      }
+      const m = currentEvaluation.metrics;
       const report = {
-        timestamp: new Date().toISOString(),
+        exportedAt: new Date().toISOString(),
+        conversationId: currentEvaluation.conversationId,
         summary: {
-          totalMetrics: selectedData.builtin.length + selectedData.custom.length,
-          builtinMetrics: selectedData.builtin.length,
-          customMetrics: selectedData.custom.length
+          overallPass: m.overallPass,
+          metricsPassed: m.metricsPassed,
+          metricsTotal: m.metricsTotal,
+          passThreshold: m.passThreshold,
+          scoringMethod: m.scoringMethod,
+          judgeModel: m.judgeModel,
+          failedResponses: (m.failedResponses || []).length,
+          averageResponseTime: m.averageResponseTime,
         },
-        metrics: {
-          builtin: selectedData.builtin,
-          custom: selectedData.custom
-        },
-        evaluation: currentEvaluation ? {
-          apiEndpoint: currentEvaluation.metrics?.apiEndpoint,
-          totalMessages: currentEvaluation.metrics?.totalMessages,
-          averageResponseTime: currentEvaluation.metrics?.averageResponseTime,
-          timestamp: currentEvaluation.metrics?.timestamp
-        } : null
+        metrics: Object.fromEntries(Object.entries(m.qualityMetrics || {}).map(([k, v]) => [k, {
+          label: metricLabel(k, m), avg: v.avg, min: v.min, max: v.max, passed: v.passed, worstReason: v.worst_reason,
+        }])),
+        evaluation: m,
       };
 
       const dataStr = JSON.stringify(report, null, 2);
@@ -1455,6 +1615,30 @@
       const mode = document.getElementById('evaluationMode').value;
       document.getElementById('dynamicModeUI').style.display = mode === 'dynamic' ? 'block' : 'none';
       document.getElementById('staticModeUI').style.display = mode === 'static' ? 'block' : 'none';
+      document.getElementById('suiteModeUI').style.display = mode === 'suite' ? 'block' : 'none';
+    }
+
+    let testSuites = [];
+
+    async function loadSuites() {
+      try {
+        const res = await fetch('/api/suites');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        testSuites = await res.json();
+        document.getElementById('suiteSelect').innerHTML = testSuites
+          .map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.caseCount} cases)</option>`)
+          .join('');
+        updateSuiteInfo();
+      } catch (e) {
+        document.getElementById('suiteInfo').textContent = `Could not load test suites: ${e.message}`;
+      }
+    }
+
+    function updateSuiteInfo() {
+      const suite = testSuites.find(s => s.id === document.getElementById('suiteSelect').value);
+      document.getElementById('suiteInfo').textContent = suite
+        ? `${suite.description}. Categories: ${suite.categories.join(', ')}.`
+        : '';
     }
 
     async function runDeepEval() {
@@ -1509,11 +1693,14 @@
           }
           payload.initialPrompt = initialPrompt;
           payload.numberOfTests = numTests;
+        } else if (evaluationMode === 'suite') {
+          payload.suiteId = document.getElementById('suiteSelect').value;
+          if (!payload.suiteId) throw new Error('Select a test suite');
         } else {
           payload.testPrompts = customPrompts;
         }
 
-        updateProgress(10, `Sending request (${numTests} test prompts)...`);
+        updateProgress(10, 'Sending request...');
 
         const response = await fetch('/api/deepeval', {
           method: 'POST',
@@ -1535,15 +1722,10 @@
           throw new Error('Evaluation stream ended unexpectedly');
         }
 
-        currentEvaluation = data;
+        updateProgress(96, 'Rendering results and charts...');
+        renderEvaluation(data);
 
-        updateProgress(94, 'Loading conversation data and generating charts...');
-        displayMetrics(data.metrics);
-
-        updateProgress(96, 'Creating performance graphs...');
-        await loadConversationResults(data);
-
-        updateProgress(98, 'Loading artifacts...');
+        updateProgress(98, 'Loading evaluation history...');
         await loadArtifacts();
 
         updateProgress(100, '✅ Evaluation complete!');
@@ -1638,16 +1820,57 @@
       }
     }
 
+    // Uniform quality bar applied to every metric — must match PASS_THRESHOLD in evaluate_responses.py
+    const PASS_THRESHOLD = 0.75;
+
+    const METRIC_LABELS = {
+      answer_relevancy: 'Answer Relevancy',
+      faithfulness: 'Faithfulness',
+      contextual_precision: 'Contextual Precision',
+      contextual_recall: 'Contextual Recall',
+      contextual_relevancy: 'Contextual Relevancy',
+      hallucination: 'Hallucination',
+      toxicity: 'Toxicity',
+      summarization: 'Summarization',
+      reference_match: 'Reference Match',
+      response_length: 'Response Length',
+      completeness: 'Completeness',
+      clarity: 'Clarity',
+    };
+
+    // Labels come from the run itself so past runs render correctly even after custom metrics are removed.
+    function metricLabel(key, metrics) {
+      if (key.startsWith('custom_')) {
+        const id = key.slice('custom_'.length);
+        const cm = ((metrics && metrics.customMetrics) || customMetrics).find(m => m.id === id);
+        return cm ? cm.name : key;
+      }
+      return METRIC_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function scoringMethodLabel(metrics) {
+      switch (metrics.scoringMethod) {
+        case 'llm_judge': return `LLM judge (${metrics.judgeModel || 'model'}, isolated session per response)`;
+        case 'mixed': return `LLM judge (${metrics.judgeModel || 'model'}) with heuristic fallback for some responses`;
+        case 'heuristic': return 'Heuristic fallback only (no judge API configured or reachable)';
+        default: return 'Legacy heuristic scoring (run predates the LLM judge)';
+      }
+    }
+
+    function renderEvaluation(data) {
+      currentEvaluation = data;
+      displayMetrics(data.metrics);
+      loadConversationResults(data);
+      document.getElementById('resultsContainer').style.display = 'block';
+      document.getElementById('metricsContainer').style.display = 'block';
+    }
+
     function displayMetrics(metrics) {
       const metricsGrid = document.getElementById('metricsGrid');
-
-      // Calculate overall quality score
-      let overallScore = 'N/A';
-      if (metrics.qualityMetrics && Object.keys(metrics.qualityMetrics).length > 0) {
-        const scores = Object.values(metrics.qualityMetrics).map(d => d.avg);
-        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-        overallScore = (avgScore * 100).toFixed(0) + '%';
-      }
+      const scores = Object.values(metrics.qualityMetrics || {}).map(d => d.avg);
+      const avgScore = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+      const overallScore = avgScore === null ? 'N/A' : Math.round(avgScore * 100) + '%';
+      const scoreColor = avgScore === null ? '#999' : avgScore >= PASS_THRESHOLD ? '#4caf50' : '#f44336';
 
       metricsGrid.innerHTML = `
         <div class="metric-card">
@@ -1663,84 +1886,45 @@
           <div class="metric-label">Test Prompts</div>
         </div>
         <div class="metric-card">
-          <div class="metric-value" style="color: #4caf50;">${overallScore}</div>
+          <div class="metric-value" style="color: ${scoreColor};">${overallScore}</div>
           <div class="metric-label">Quality Score</div>
         </div>
       `;
     }
 
-    async function loadConversationResults(evaluationData) {
-      try {
-        const table = document.getElementById('conversationTable');
-        const metrics = evaluationData.metrics;
+    function loadConversationResults(evaluationData) {
+      const metrics = evaluationData.metrics;
+      const failed = new Set((metrics.failedResponses || []).map(f => f.index));
 
-        let html = '';
-        for (let i = 0; i < metrics.prompts.length; i++) {
-          html += `
-            <tr>
-              <td><div class="prompt">${escapeHtml(metrics.prompts[i])}</div></td>
-              <td><div class="response">${escapeHtml(metrics.responses[i])}</div></td>
-            </tr>
-          `;
-        }
-        table.innerHTML = html;
+      document.getElementById('conversationTable').innerHTML = metrics.prompts.map((p, i) => `
+        <tr>
+          <td><div class="prompt">${escapeHtml(p)}</div></td>
+          <td><div class="response" ${failed.has(i) ? 'style="color:#c62828;"' : ''}>${failed.has(i) ? '⚠️ ' : ''}${escapeHtml(metrics.responses[i])}</div></td>
+        </tr>
+      `).join('');
 
-        const analysisTable = document.getElementById('analysisTable');
-        const responseTimes = metrics.responseTimes || [];
-        const minTime = responseTimes.length > 0 ? Math.min(...responseTimes) : 0;
-        const maxTime = responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
+      const responseTimes = metrics.responseTimes || [];
+      const rows = [
+        ['Evaluation Mode', metrics.evaluationMode === 'dynamic' ? '🤖 Dynamic (AI-Generated)' : metrics.evaluationMode === 'suite' ? `📚 Test Suite: ${metrics.suiteName}` : '📝 Static (Predefined)'],
+        ['Conversation Handling', metrics.isolatedPrompts ? 'Each prompt in its own conversation' : 'One shared conversation'],
+        ['Scoring Method', scoringMethodLabel(metrics)],
+        ['Total Messages', metrics.totalMessages],
+        ['Failed Responses', `${failed.size} of ${metrics.prompts.length}`],
+        ['Average Response Time', `${metrics.averageResponseTime}ms`],
+        ['Min Response Time', `${responseTimes.length ? Math.min(...responseTimes) : 0}ms`],
+        ['Max Response Time', `${responseTimes.length ? Math.max(...responseTimes) : 0}ms`],
+        ['Number of Prompts', metrics.prompts.length],
+        ['Evaluation Timestamp', new Date(metrics.timestamp).toLocaleString()],
+        ['API Endpoint', metrics.apiEndpoint],
+      ];
+      document.getElementById('analysisTable').innerHTML = rows
+        .map(([k, v]) => `<tr><td>${k}</td><td><strong>${escapeHtml(String(v))}</strong></td></tr>`)
+        .join('');
 
-        analysisTable.innerHTML = `
-          <tr>
-            <td>Evaluation Mode</td>
-            <td><strong>${metrics.evaluationMode === 'dynamic' ? '🤖 Dynamic (AI-Generated)' : '📝 Static (Predefined)'}</strong></td>
-          </tr>
-          <tr>
-            <td>Total Messages</td>
-            <td><strong>${metrics.totalMessages}</strong></td>
-          </tr>
-          <tr>
-            <td>Average Response Time</td>
-            <td><strong>${metrics.averageResponseTime}ms</strong></td>
-          </tr>
-          <tr>
-            <td>Min Response Time</td>
-            <td><strong>${minTime}ms</strong></td>
-          </tr>
-          <tr>
-            <td>Max Response Time</td>
-            <td><strong>${maxTime}ms</strong></td>
-          </tr>
-          <tr>
-            <td>Number of Prompts</td>
-            <td><strong>${metrics.prompts.length}</strong></td>
-          </tr>
-          <tr>
-            <td>Evaluation Timestamp</td>
-            <td><strong>${new Date(metrics.timestamp).toLocaleString()}</strong></td>
-          </tr>
-          <tr>
-            <td>API Endpoint</td>
-            <td><strong>${escapeHtml(metrics.apiEndpoint)}</strong></td>
-          </tr>
-        `;
-
-        // Display quality metrics if available
-        if (metrics.qualityMetrics && Object.keys(metrics.qualityMetrics).length > 0) {
-          displayOverallPassSummary(metrics);
-          displayQualityMetrics(metrics.qualityMetrics, metrics.individualMetrics);
-        }
-
-        // Generate performance charts
-        createPerformanceCharts(metrics);
-      } catch (error) {
-        console.error(error);
-        showStatus(`Failed to load conversation: ${error.message}`, 'error');
-      }
+      displayOverallPassSummary(metrics);
+      displayQualityMetrics(metrics);
+      createPerformanceCharts(metrics);
     }
-
-    // Uniform quality bar applied to every metric — must match PASS_THRESHOLD in evaluate_responses.py
-    const PASS_THRESHOLD = 0.75;
 
     function displayOverallPassSummary(metrics) {
       const el = document.getElementById('overallPassSummary');
@@ -1749,232 +1933,194 @@
       const passed = metrics.metricsPassed ?? 0;
       const total = metrics.metricsTotal ?? 0;
       const rate = total > 0 ? Math.round((passed / total) * 100) : 0;
+      const failedCount = (metrics.failedResponses || []).length;
       const allPass = metrics.overallPass;
+      const headline = allPass
+        ? '✅ ALL METRICS PASSED'
+        : failedCount > 0 ? `⚠️ ${failedCount} RESPONSE${failedCount > 1 ? 'S' : ''} FAILED — RUN CANNOT PASS` : '⚠️ SOME METRICS BELOW 75% THRESHOLD';
+
+      const notes = [`Scored by: ${scoringMethodLabel(metrics)}`];
+      if (failedCount > 0) notes.push(`${failedCount} chatbot error${failedCount > 1 ? 's were' : ' was'} excluded from scoring (see Conversation tab).`);
+      if ((metrics.unmeasuredMetrics || []).length) {
+        notes.push(`Not measurable without an LLM judge: ${metrics.unmeasuredMetrics.map(k => metricLabel(k, metrics)).join(', ')}.`);
+      }
 
       el.innerHTML = `
         <div class="overall-pass-summary ${allPass ? 'all-pass' : 'some-fail'}">
-          <span>${allPass ? '✅ ALL METRICS PASSED' : '⚠️ SOME METRICS BELOW 75% THRESHOLD'}</span>
+          <span>${headline}</span>
           <span>${passed}/${total} metrics passed (${rate}%)</span>
         </div>
+        <div style="font-size:12px;color:#666;margin:-8px 0 16px 2px;line-height:1.6;">${notes.map(escapeHtml).join('<br>')}</div>
       `;
     }
 
-    function displayQualityMetrics(qualityMetrics, individualMetrics) {
+    function displayQualityMetrics(metrics) {
       const grid = document.getElementById('qualityMetricsGrid');
       if (!grid) return;
+      const qualityMetrics = metrics.qualityMetrics || {};
 
-      const metricLabels = {
-        'answer_relevancy': 'Answer Relevancy',
-        'faithfulness': 'Faithfulness',
-        'contextual_precision': 'Contextual Precision',
-        'contextual_recall': 'Contextual Recall',
-        'contextual_relevancy': 'Contextual Relevancy',
-        'hallucination': 'Hallucination',
-        'toxicity': 'Toxicity',
-        'summarization': 'Summarization',
-        'response_length': 'Response Length',
-        'completeness': 'Completeness',
-        'clarity': 'Clarity'
-      };
-
-      let html = '';
-
-      // Show only selected built-in metrics
-      for (const [key, data] of Object.entries(qualityMetrics)) {
-        const label = metricLabels[key] || key.replace(/_/g, ' ');
-
-        // Check if this metric is in the selected list
-        if (!selectedMetrics.builtin.has(label)) continue;
-
-        const avg = data.avg;
+      const runCustomMetricsBadge = (metrics && metrics.customMetrics) || customMetrics;
+      let html = Object.entries(qualityMetrics).map(([key, data]) => {
+        const isCustom = key.startsWith('custom_');
         const threshold = data.threshold ?? PASS_THRESHOLD;
-        const passed = data.passed ?? (avg >= threshold);
-        const className = passed ? 'good' : 'poor';
-        const status = passed ? `✅ Pass (≥${(threshold * 100).toFixed(0)}%)` : `❌ Fail (<${(threshold * 100).toFixed(0)}%)`;
-
-        html += `
-          <div class="quality-metric-badge ${className}">
-            <div class="quality-metric-name">${label}</div>
-            <div class="quality-metric-value">${(avg * 100).toFixed(0)}%</div>
-            <div class="quality-metric-bar">
-              <div class="quality-metric-bar-fill" style="width: ${avg * 100}%; background: ${
-                passed ? '#4caf50' : '#f44336'
-              };"></div>
-            </div>
-            <div class="quality-metric-status">${status}</div>
-          </div>
-        `;
-      }
-
-      // Show selected custom metrics with scores
-      customMetrics.forEach(metric => {
-        if (selectedMetrics.custom.has(metric.id)) {
-          const metricKey = `custom_${metric.id}`;
-          const customData = qualityMetrics[metricKey];
-
-          if (customData) {
-            const avg = customData.avg;
-            const threshold = customData.threshold ?? PASS_THRESHOLD;
-            const passed = customData.passed ?? (avg >= threshold);
-            const className = passed ? 'good' : 'poor';
-            const status = passed ? `✅ Pass (≥${(threshold * 100).toFixed(0)}%)` : `❌ Fail (<${(threshold * 100).toFixed(0)}%)`;
-
-            html += `
-              <div class="quality-metric-badge ${className}" style="border-color: #ff9800;">
-                <div class="quality-metric-name">🎯 ${escapeHtml(metric.name)}</div>
-                <div class="quality-metric-value" style="color: #ff9800;">${(avg * 100).toFixed(0)}%</div>
-                <div class="quality-metric-bar">
-                  <div class="quality-metric-bar-fill" style="width: ${avg * 100}%; background: ${passed ? '#4caf50' : '#f44336'};"></div>
-                </div>
-                <div class="quality-metric-status">${status}</div>
-              </div>
-            `;
-          } else {
-            // Placeholder if metric not evaluated yet
-            html += `
-              <div class="quality-metric-badge" style="border-color: #ff9800; background: #fff3e0;">
-                <div class="quality-metric-name" style="color: #e65100;">🎯 ${escapeHtml(metric.name)}</div>
-                <div class="quality-metric-value" style="color: #ff9800; font-size: 16px;">-</div>
-                <div style="font-size: 11px; color: #666; margin: 6px 0; line-height: 1.3;">${escapeHtml(metric.desc)}</div>
-                <div class="quality-metric-status" style="color: #e65100;">Evaluating...</div>
-              </div>
-            `;
+        const passed = data.passed ?? (data.avg >= threshold);
+        const status = passed ? `✅ Pass (≥${Math.round(threshold * 100)}%)` : `❌ Fail (<${Math.round(threshold * 100)}%)`;
+        let tooltip = data.worst_reason ? `Lowest-scoring response: ${data.worst_reason}` : '';
+        if (isCustom) {
+          const cmId = key.slice('custom_'.length);
+          const cmObj = runCustomMetricsBadge.find(m => m.id === cmId);
+          if (cmObj && cmObj.params && cmObj.params.length) {
+            tooltip = `Parameters: ${cmObj.params.join(' | ')}${tooltip ? '\n' + tooltip : ''}`;
           }
         }
-      });
+        return `
+          <div class="quality-metric-badge ${passed ? 'good' : 'poor'}" ${isCustom ? 'style="border-color: #ff9800;"' : ''} title="${escapeHtml(tooltip)}">
+            <div class="quality-metric-name">${isCustom ? '🎯 ' : ''}${escapeHtml(metricLabel(key, metrics))}</div>
+            <div class="quality-metric-value" ${isCustom ? 'style="color: #ff9800;"' : ''}>${Math.round(data.avg * 100)}%</div>
+            <div class="quality-metric-bar">
+              <div class="quality-metric-bar-fill" style="width: ${data.avg * 100}%; background: ${passed ? '#4caf50' : '#f44336'};"></div>
+            </div>
+            <div class="quality-metric-status">${status}</div>
+            ${data.worst_reason ? `<div style="font-size:11px;color:#777;margin-top:6px;line-height:1.3;">${escapeHtml(data.worst_reason)}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      html += (metrics.unmeasuredMetrics || []).map(key => `
+        <div class="quality-metric-badge" style="background:#f5f5f5;">
+          <div class="quality-metric-name">${escapeHtml(metricLabel(key, metrics))}</div>
+          <div class="quality-metric-value" style="color:#999;font-size:16px;">N/A</div>
+          <div class="quality-metric-status" style="color:#999;">Needs LLM judge</div>
+        </div>
+      `).join('');
 
       grid.innerHTML = html;
-
-      // Create quality metrics charts
-      createQualityMetricsCharts(qualityMetrics);
+      createQualityMetricsCharts(metrics);
+      displayResponseBreakdown(metrics);
     }
 
-    function createQualityMetricsCharts(qualityMetrics) {
+    // One expandable row per scored response: its scores at a glance, and the judge's reason for each.
+    function displayResponseBreakdown(metrics) {
+      const el = document.getElementById('responseBreakdown');
+      const individual = metrics.individualMetrics || [];
+      const reasons = metrics.individualReasons || [];
+      if (!individual.length || !metrics.evaluatedIndices) {
+        el.innerHTML = '';
+        return;
+      }
+      const keys = Object.keys(metrics.qualityMetrics || {});
+      const color = v => v >= PASS_THRESHOLD ? '#2e7d32' : v >= 0.5 ? '#e65100' : '#c62828';
+      const bg = v => v >= PASS_THRESHOLD ? '#e8f5e9' : v >= 0.5 ? '#fff3e0' : '#ffebee';
+
+      const rows = individual.map((scores, j) => {
+        const i = metrics.evaluatedIndices[j];
+        const vals = keys.map(k => scores[k]).filter(v => typeof v === 'number');
+        const worst = vals.length ? Math.min(...vals) : null;
+        const chips = keys.filter(k => typeof scores[k] === 'number').map(k => `
+          <span title="${escapeHtml(metricLabel(k, metrics))}" style="display:inline-block;margin:2px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${bg(scores[k])};color:${color(scores[k])};">${escapeHtml(metricLabel(k, metrics))}: ${Math.round(scores[k] * 100)}%</span>
+        `).join('');
+        const reasonRows = keys.filter(k => typeof scores[k] === 'number').map(k => `
+          <tr>
+            <td style="width:180px;">${escapeHtml(metricLabel(k, metrics))}</td>
+            <td style="width:70px;text-align:center;font-weight:700;color:${color(scores[k])};">${Math.round(scores[k] * 100)}%</td>
+            <td>${escapeHtml((reasons[j] || {})[k] || '')}</td>
+          </tr>
+        `).join('');
+        const caseId = metrics.caseIds ? metrics.caseIds[i] : null;
+        const reference = metrics.references ? metrics.references[i] : null;
+        return `
+          <details style="border:1px solid #e0e0e0;border-left:4px solid ${worst === null ? '#ccc' : color(worst)};border-radius:6px;padding:10px 12px;margin-bottom:8px;background:white;">
+            <summary style="cursor:pointer;font-size:13px;">
+              <strong>#${i + 1}${caseId ? ` · ${escapeHtml(caseId)}` : ''}</strong>
+              <span style="color:#555;"> ${escapeHtml((metrics.prompts[i] || '(empty prompt)').slice(0, 110))}${(metrics.prompts[i] || '').length > 110 ? '…' : ''}</span>
+              <div style="margin-top:6px;">${chips}</div>
+            </summary>
+            <div style="margin-top:10px;font-size:12px;">
+              ${reference ? `<div style="background:#f5f7ff;padding:8px 10px;border-radius:4px;margin-bottom:8px;"><strong>Expected:</strong> ${escapeHtml(reference)}</div>` : ''}
+              <div style="background:#fafafa;padding:8px 10px;border-radius:4px;margin-bottom:8px;max-height:160px;overflow:auto;white-space:pre-wrap;"><strong>Response:</strong> ${escapeHtml(metrics.responses[i] || '')}</div>
+              <table style="font-size:12px;"><tbody>${reasonRows}</tbody></table>
+            </div>
+          </details>
+        `;
+      }).join('');
+
+      el.innerHTML = `
+        <h3 style="margin-bottom:8px;">🔍 Per-Response Breakdown</h3>
+        <p style="font-size:12px;color:#666;margin-bottom:12px;">Click a response to see its expected answer (suites), the full response, and the judge's reason for every score. The coloured edge shows its lowest score.</p>
+        ${rows}
+      `;
+    }
+
+    function createQualityMetricsCharts(metrics) {
       const chartsGrid = document.getElementById('qualityChartsGrid');
       if (!chartsGrid) return;
 
-      chartsGrid.innerHTML = '';
-
-      // Chart 1: Quality Metrics Radar
-      const radarChart = document.createElement('div');
-      radarChart.className = 'chart-container';
-      radarChart.innerHTML = `
-        <h3>⭐ Quality Metrics Overview</h3>
-        <div class="chart-wrapper">
-          <canvas id="qualityRadarChart"></canvas>
+      chartsGrid.innerHTML = `
+        <div class="chart-container">
+          <h3>⭐ Quality Metrics Overview</h3>
+          <div class="chart-wrapper"><canvas id="qualityRadarChart"></canvas></div>
+        </div>
+        <div class="chart-container">
+          <h3>📊 Metric Scores Distribution</h3>
+          <div class="chart-wrapper"><canvas id="qualityScoresChart"></canvas></div>
         </div>
       `;
-      chartsGrid.appendChild(radarChart);
 
-      // Chart 2: Individual Response Scores
-      const scoresChart = document.createElement('div');
-      scoresChart.className = 'chart-container';
-      scoresChart.innerHTML = `
-        <h3>📊 Metric Scores Distribution</h3>
-        <div class="chart-wrapper">
-          <canvas id="qualityScoresChart"></canvas>
-        </div>
-      `;
-      chartsGrid.appendChild(scoresChart);
+      const entries = Object.entries(metrics.qualityMetrics || {});
+      if (entries.length === 0) return;
+      const metricNames = entries.map(([k]) => (k.startsWith('custom_') ? '🎯 ' : '') + metricLabel(k, metrics));
+      const metricAvgs = entries.map(([, d]) => d.avg);
 
       setTimeout(() => {
-        const metricLabelsMap = {
-          'answer_relevancy': 'Answer Relevancy', 'faithfulness': 'Faithfulness',
-          'contextual_precision': 'Contextual Precision', 'contextual_recall': 'Contextual Recall',
-          'contextual_relevancy': 'Contextual Relevancy', 'hallucination': 'Hallucination',
-          'toxicity': 'Toxicity', 'summarization': 'Summarization',
-          'response_length': 'Response Length', 'completeness': 'Completeness', 'clarity': 'Clarity'
-        };
-
-        // Filter to only selected metrics for charts
-        const filteredEntries = Object.entries(qualityMetrics).filter(([k]) => {
-          if (k.startsWith('custom_')) {
-            const metricId = k.replace('custom_', '');
-            return selectedMetrics.custom.has(metricId);
+        new Chart(document.getElementById('qualityRadarChart'), {
+          type: 'radar',
+          data: {
+            labels: metricNames,
+            datasets: [{
+              label: 'Quality Scores',
+              data: metricAvgs,
+              borderColor: '#667eea',
+              backgroundColor: 'rgba(102, 126, 234, 0.2)',
+              fill: true,
+              pointBackgroundColor: '#667eea',
+              pointRadius: 4,
+              pointHoverRadius: 6
+            }, {
+              label: 'Pass threshold (75%)',
+              data: metricAvgs.map(() => PASS_THRESHOLD),
+              borderColor: '#f44336',
+              borderDash: [4, 4],
+              pointRadius: 0,
+              fill: false
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { r: { beginAtZero: true, max: 1, ticks: { stepSize: 0.2 } } },
+            plugins: { legend: { display: true } }
           }
-          const label = metricLabelsMap[k] || k.replace(/_/g, ' ');
-          return selectedMetrics.builtin.has(label);
         });
 
-        const metricNames = filteredEntries.map(([k]) => {
-          if (k.startsWith('custom_')) {
-            const metricId = k.replace('custom_', '');
-            const customMetric = customMetrics.find(m => m.id === metricId);
-            return customMetric ? `🎯 ${customMetric.name}` : k;
+        new Chart(document.getElementById('qualityScoresChart'), {
+          type: 'bar',
+          data: {
+            labels: metricNames,
+            datasets: [{
+              label: 'Score (%)',
+              data: metricAvgs.map(v => Math.round(v * 100)),
+              backgroundColor: metricAvgs.map(v => v >= PASS_THRESHOLD ? '#4caf50' : v >= 0.5 ? '#ff9800' : '#f44336'),
+              borderRadius: 4
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true, max: 100 } }
           }
-          return metricLabelsMap[k] || k.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         });
-        const metricAvgs = filteredEntries.map(([, d]) => d.avg);
-
-        // Radar Chart
-        const ctx1 = document.getElementById('qualityRadarChart');
-        if (ctx1 && metricAvgs.length > 0) {
-          new Chart(ctx1, {
-            type: 'radar',
-            data: {
-              labels: metricNames,
-              datasets: [{
-                label: 'Quality Scores',
-                data: metricAvgs,
-                borderColor: '#667eea',
-                backgroundColor: 'rgba(102, 126, 234, 0.2)',
-                fill: true,
-                pointBackgroundColor: '#667eea',
-                pointRadius: 4,
-                pointHoverRadius: 6
-              }]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              scales: {
-                r: {
-                  beginAtZero: true,
-                  max: 1,
-                  ticks: {
-                    stepSize: 0.2
-                  }
-                }
-              },
-              plugins: {
-                legend: { display: true }
-              }
-            }
-          });
-        }
-
-        // Scores Bar Chart
-        const ctx2 = document.getElementById('qualityScoresChart');
-        if (ctx2 && metricAvgs.length > 0) {
-          new Chart(ctx2, {
-            type: 'bar',
-            data: {
-              labels: metricNames,
-              datasets: [{
-                label: 'Score (%)',
-                data: metricAvgs.map(v => v * 100),
-                backgroundColor: metricAvgs.map(v =>
-                  v >= 0.7 ? '#4caf50' : v >= 0.5 ? '#ff9800' : '#f44336'
-                ),
-                borderRadius: 4
-              }]
-            },
-            options: {
-              indexAxis: 'y',
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
-                legend: { display: false }
-              },
-              scales: {
-                x: {
-                  beginAtZero: true,
-                  max: 100
-                }
-              }
-            }
-          });
-        }
       }, 100);
     }
 
@@ -2110,36 +2256,143 @@
       }, 100);
     }
 
+    let historyTrendChart = null;
+
+    function pct(v) {
+      return v === null || v === undefined ? 'N/A' : Math.round(v * 100) + '%';
+    }
+
+    function deltaBadge(current, previous) {
+      if (current === null || current === undefined || previous === null || previous === undefined) return '';
+      const d = Math.round((current - previous) * 100);
+      if (d === 0) return '<span style="color:#999;">±0</span>';
+      return `<span style="color:${d > 0 ? '#2e7d32' : '#c62828'};font-weight:600;">${d > 0 ? '▲ +' : '▼ '}${d}</span>`;
+    }
+
     async function loadArtifacts() {
+      const list = document.getElementById('artifactsList');
       try {
         const response = await fetch('/api/artifacts');
-        if (!response.ok) throw new Error('Failed to load artifacts');
-
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const artifacts = await response.json();
-        const artifactsList = document.getElementById('artifactsList');
 
-        artifactsList.innerHTML = artifacts.slice(0, 10).map(artifact => `
-          <div class="artifact-item" onclick="viewArtifact('${artifact.id}')">
-            <div class="artifact-title">📊 Evaluation ${artifact.id.substring(0, 8)}</div>
-            <div class="artifact-date">${new Date(artifact.createdAt).toLocaleString()}</div>
-            <div class="artifact-metrics">
-              <div class="artifact-metric">Messages: ${artifact.metrics.totalMessages}</div>
-              <div class="artifact-metric">Response: ${artifact.metrics.averageResponseTime}ms</div>
-              <div class="artifact-metric">Prompts: ${artifact.metrics.prompts.length}</div>
-              <div class="artifact-metric">
-                <a href="/api/artifacts/${artifact.id}" download style="color: #667eea; text-decoration: none;">⬇ Download</a>
+        if (artifacts.length === 0) {
+          list.innerHTML = '<p style="color:#999;font-size:13px;">No saved evaluations yet.</p>';
+          return;
+        }
+
+        list.innerHTML = artifacts.slice(0, 12).map((a, i) => {
+          const prev = artifacts[i + 1];
+          const isCurrent = currentEvaluation && currentEvaluation.conversationId === a.id;
+          return `
+            <div class="artifact-item" onclick="loadRun('${a.id}')" title="Load this run into the dashboard" ${isCurrent ? 'style="border-color:#667eea;border-width:2px;"' : ''}>
+              <div class="artifact-title">${a.overallPass ? '✅' : '⚠️'} ${escapeHtml(a.id.replace(/^eval_/, ''))}${isCurrent ? ' <span style="color:#667eea;font-size:11px;">(showing)</span>' : ''}</div>
+              <div class="artifact-date">${new Date(a.createdAt).toLocaleString()} · ${a.evaluationMode === 'dynamic' ? 'Dynamic' : a.evaluationMode === 'suite' ? `Suite: ${escapeHtml(a.suiteName || a.suiteId)}` : 'Static'}${a.scoringMethod === 'legacy' ? ' · legacy scoring' : ''}</div>
+              <div class="artifact-metrics">
+                <div class="artifact-metric">Avg score: <strong>${pct(a.averageScore)}</strong> ${prev ? deltaBadge(a.averageScore, prev.averageScore) : ''}</div>
+                <div class="artifact-metric">Passed: <strong>${a.metricsPassed}/${a.metricsTotal}</strong></div>
+                <div class="artifact-metric">Prompts: ${a.totalPrompts}${a.failedResponses ? ` <span style="color:#c62828;">(${a.failedResponses} failed)</span>` : ''}</div>
+                <div class="artifact-metric"><a href="/api/artifacts/${a.id}" download="${a.id}.json" onclick="event.stopPropagation()" style="color: #667eea; text-decoration: none;">⬇ Download JSON</a></div>
               </div>
             </div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
+
+        renderRunComparison(artifacts);
+        renderHistoryTrend(artifacts);
       } catch (error) {
         console.error(error);
+        list.innerHTML = `<p style="color:#c62828;font-size:13px;">Could not load evaluation history: ${escapeHtml(error.message)}</p>`;
       }
     }
 
-    function viewArtifact(artifactId) {
-      const url = `/api/artifacts/${artifactId}`;
-      window.open(url, '_blank');
+    // Compares the run on screen with the run saved just before it, metric by metric.
+    function renderRunComparison(artifacts) {
+      const el = document.getElementById('runComparison');
+      const idx = currentEvaluation ? artifacts.findIndex(a => a.id === currentEvaluation.conversationId) : -1;
+      const current = artifacts[idx];
+      // Prefer the previous run of the same chatbot endpoint and suite/mode so the comparison covers the same questions.
+      const older = idx >= 0 ? artifacts.slice(idx + 1).filter(a => a.scoringMethod !== 'legacy') : [];
+      const sameSetup = a => a.apiEndpoint === current?.apiEndpoint && a.evaluationMode === current?.evaluationMode;
+      const previous = older.find(a => sameSetup(a) && a.suiteId === current?.suiteId) || older.find(sameSetup) || older[0];
+      if (!current || !previous) {
+        el.innerHTML = '';
+        return;
+      }
+
+      const labelFor = (key, run) => {
+        if (!key.startsWith('custom_')) return METRIC_LABELS[key] || key;
+        const cm = run.customMetrics.find(m => `custom_${m.id}` === key);
+        return cm ? `🎯 ${cm.name}` : key;
+      };
+      const keys = [...new Set([...Object.keys(current.scores), ...Object.keys(previous.scores)])];
+      const rows = keys.map(k => `
+        <tr>
+          <td>${escapeHtml(labelFor(k, k in current.scores ? current : previous))}</td>
+          <td style="text-align:center;">${pct(previous.scores[k])}</td>
+          <td style="text-align:center;">${pct(current.scores[k])}</td>
+          <td style="text-align:center;">${deltaBadge(current.scores[k], previous.scores[k])}</td>
+        </tr>
+      `).join('');
+
+      el.innerHTML = `
+        <div class="table-container" style="margin-top:8px;">
+          <div style="font-size:13px;color:#666;margin-bottom:8px;">
+            Comparing the run on screen with the previous ${previous.suiteId && previous.suiteId === current.suiteId ? `run of the <strong>${escapeHtml(current.suiteName)}</strong>` : 'run'} (${new Date(previous.createdAt).toLocaleString()})${previous.suiteId !== current.suiteId || !current.suiteId ? ' — the questions may differ' : ''}.
+            Average score ${pct(previous.averageScore)} → <strong>${pct(current.averageScore)}</strong> ${deltaBadge(current.averageScore, previous.averageScore)}
+          </div>
+          <table>
+            <thead><tr><th>Metric</th><th style="text-align:center;">Previous</th><th style="text-align:center;">This run</th><th style="text-align:center;">Δ (pts)</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderHistoryTrend(artifacts) {
+      // Legacy runs used fixed placeholder scores, so they aren't comparable with judge-scored runs.
+      const runs = artifacts.filter(a => a.averageScore !== null && a.scoringMethod !== 'legacy').slice(0, 15).reverse();
+      const wrapper = document.getElementById('historyTrend');
+      if (runs.length < 2) {
+        wrapper.style.display = 'none';
+        return;
+      }
+      wrapper.style.display = 'block';
+      if (historyTrendChart) historyTrendChart.destroy();
+      historyTrendChart = new Chart(document.getElementById('historyTrendChart'), {
+        type: 'line',
+        data: {
+          labels: runs.map(r => new Date(r.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + new Date(r.createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })),
+          datasets: [
+            { label: 'Average score (%)', data: runs.map(r => Math.round(r.averageScore * 100)), borderColor: '#667eea', backgroundColor: 'rgba(102,126,234,0.1)', fill: true, tension: 0.3 },
+            { label: 'Metrics passed (%)', data: runs.map(r => Math.round((r.overallPassRate || 0) * 100)), borderColor: '#4caf50', tension: 0.3 },
+            { label: 'Pass threshold', data: runs.map(() => PASS_THRESHOLD * 100), borderColor: '#f44336', borderDash: [4, 4], pointRadius: 0 },
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { beginAtZero: true, max: 100 } },
+          plugins: {
+            tooltip: { callbacks: { afterLabel: (ctx) => runs[ctx.dataIndex].scoringMethod === 'heuristic' ? '(heuristic fallback scoring)' : '' } }
+          }
+        }
+      });
+    }
+
+    async function loadRun(id) {
+      try {
+        showStatus('⏳ Loading saved evaluation...', 'loading');
+        const response = await fetch(`/api/artifacts/${encodeURIComponent(id)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        renderEvaluation({ ...data, conversationId: id });
+        await loadArtifacts();
+        showStatus(`✅ Loaded evaluation from ${new Date(data.createdAt).toLocaleString()}`, 'success');
+        window.scrollTo({ top: document.getElementById('metricsContainer').offsetTop - 16, behavior: 'smooth' });
+      } catch (error) {
+        showStatus(`❌ Could not load evaluation: ${error.message}`, 'error');
+      }
     }
 
     function showStatus(message, type) {

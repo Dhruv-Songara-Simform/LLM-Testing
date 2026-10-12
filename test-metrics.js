@@ -4,6 +4,7 @@
  * Tests the Python-Node.js integration without needing a full server
  */
 
+import 'dotenv/config';
 import { spawn } from 'child_process';
 import { join } from 'path';
 
@@ -71,12 +72,10 @@ async function runTest() {
 
   if (result.error) {
     console.log(`⚠️  ${result.error}`);
-    console.log('\n📋 Note: This is expected if DeepEval is not installed.');
-    console.log('   Install it with: pip install -r requirements.txt\n');
-    return;
+    process.exit(1);
   }
 
-  console.log('✅ Evaluation complete!\n');
+  console.log(`✅ Evaluation complete! Scoring method: ${result.scoring_method}${result.judge_model ? ` (${result.judge_model})` : ''}\n`);
 
   if (result.aggregated_metrics) {
     console.log('📈 Aggregated Metrics:');

@@ -2,755 +2,968 @@
 
 ## 📋 Overview
 
-This document provides a comprehensive guide to the industry-standard chatbot evaluation framework based on DeepEval. The codebase is structured for scalability, maintainability, and production deployment.
+**SimChat DeepEval Framework** — Production-grade AI chatbot evaluation system with isolated evaluation sessions, multiple test modes, and 13+ quality metrics (8 built-in + 5 custom business metrics).
+
+This document provides a **complete reference** to every file's purpose, key implementation details, and how components interact. Use this to understand:
+
+- What each file does
+- Where to make changes for specific features
+- How data flows through the system
+- Implementation patterns for extending the framework
+
+**Key Features (Oct 2026):**
+
+- ✅ Isolated evaluation sessions (judge never shares chatbot's session)
+- ✅ LLM judge with median scoring for borderline metrics (±10 points of 75% bar)
+- ✅ Multiple evaluation modes: Dynamic, Static (parallel), Suite (with Reference Match)
+- ✅ 8 built-in + custom metrics + reference matching (13 total)
+- ✅ Test suites: Golden (5 Q&A) + Edge Cases (15+ edge cases)
+- ✅ Server-side custom metric library (persists across page reloads)
+- ✅ CLI regression gate for CI/CD with baseline comparison
+- ✅ Per-response breakdown with judge reasoning
+- ✅ Security: localhost-only, no CORS, URL allowlist
+
+---
+
+## 📁 Root-Level Directory Structure
+
+```
+.
+├── server.js                          🔴 Express.js main server (npm start)
+├── evaluate_responses.py              🔴 LLM judge engine (spawned per evaluation)
+├── eval-cli.mjs                       🟢 CLI regression gate (npm run eval) [NEW Oct 2026]
+├── test-metrics.js                    Integration test (npm run test:metrics)
+├── verify-setup.sh                    Environment validation (npm run verify)
+├── package.json                       npm dependencies & scripts
+├── requirements.txt                   Python dependencies (optional)
+├── .env                               Environment variables template
+├── .gitignore                         Git exclusion rules
+│
+├── public/
+│   ├── index.html                     Chat UI (chatbot interface)
+│   └── deepeval.html                  Evaluation dashboard (6 tabs, suite support, custom metrics) [UPDATED Oct 2026]
+│
+├── deepeval/                          Target-architecture framework
+│   ├── datasets/export_suites.py      Suite loader [NEW Oct 2026]
+│   ├── evaluation/
+│   │   ├── engine.py                  IsolatedEvaluator class (target arch)
+│   │   ├── metrics.py                 Custom business metrics
+│   │   └── __init__.py
+│   ├── datasets/
+│   │   ├── golden/quality_qa_set.py   5 human-reviewed Q&A pairs
+│   │   ├── synthetic/edge_cases.py    15+ edge-case test cases
+│   │   └── test/                      User custom tests
+│   ├── tests/
+│   │   ├── conftest.py                Pytest fixtures
+│   │   ├── test_quality.py            Golden dataset tests
+│   │   └── test_edge_cases.py         Edge case tests
+│   ├── config/
+│   │   ├── qa.py                      QA config (75% metrics)
+│   │   └── prod.py                    Prod config (75% metrics)
+│   └── ...
+│
+├── artifacts/                         Evaluation run storage
+├── custom_metrics.json                Server-side custom metric library [NEW Oct 2026]
+│
+├── docs/
+│   ├── CODEBASE_STRUCTURE.md          This file
+│   ├── QUICK_START.md
+│   ├── QUICK_REFERENCE.md
+│   ├── ARCHITECTURE_DIAGRAM.md
+│   ├── QUALITY_METRICS.md
+│   └── README_QUALITY_METRICS.md
+│
+└── reports/                           User analysis reports
+```
+
+**Legend:** 🔴 = Core (changed in Oct 2026), 🟢 = New Oct 2026, ⚪ = Existing/Unchanged
+
+---
+
+## 📄 File-by-File Reference
+
+### **server.js** — Express.js Main Server 🔴
+
+**Purpose:** HTTP server hosting chat API, evaluation orchestrator, test suite loader, and custom metrics manager.
+
+**Core Responsibilities:**
+
+1. Chat endpoint: forwards user messages to configured chatbot
+2. Evaluation orchestrator: collects responses, calls Python judge, streams progress
+3. Multiple evaluation modes: Dynamic (shared conv), Static (parallel isolated), Suite (fixed cases)
+4. Test suite loading: loads golden + edge-case datasets from Python
+5. Custom metrics CRUD: loads/saves `custom_metrics.json` for persistence
+6. Artifact storage: saves evaluation runs to `artifacts/` folder
+7. Security: URL validation, localhost-only default, no CORS
+
+**Key Functions (Implementation Details):**
+
+| Function                      | Purpose                                                | Key Logic                                                                |
+| ----------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `runPythonEvaluation()`     | Spawn`evaluate_responses.py`, stream stderr progress | Reads PROGRESS lines from stderr, final JSON from stdout                 |
+| `askChatbot()`              | Single API call to chatbot endpoint                    | Handles errors, measures response time, returns`{answer, time, error}` |
+| `mapWithConcurrency()`      | Parallel execution for static/suite modes              | Promise.all with worker pool, STATIC_CONCURRENCY (default 3)             |
+| `endpointError()`           | Validate URL against allowlist                         | Checks protocol, hostname against ALLOWED_EVAL_HOSTS                     |
+| `loadSuites()`              | Load test cases from Python datasets                   | Calls`export_suites.py`, caches result                                 |
+| `readCustomMetricLibrary()` | Load saved metrics from`custom_metrics.json`         | Empty array if file doesn't exist                                        |
+
+**Evaluation Flow (Oct 2026):**
+
+1. Request arrives: `/api/deepeval` POST with mode, prompts, metrics, suite
+2. Validate endpoint, load suite if needed
+3. Set SSE headers, start progress streaming
+4. If `dynamic`: one conversation, generate follow-ups inline
+5. If `static` or `suite`: parallel execution via `mapWithConcurrency()`
+6. Collect responses, call `runPythonEvaluation()` with prompts + responses
+7. Aggregate metrics, save to `artifacts/eval_*.json`
+8. Send complete event, close stream
+
+**Routes Served:**
+
+```javascript
+POST   /api/chat                      // Chat message
+GET    /api/health                    // Health check
+POST   /api/deepeval                  // Evaluation (SSE stream)
+GET    /api/suites                    // List test suites [NEW]
+GET    /api/custom-metrics            // Load metric library [NEW]
+POST   /api/custom-metrics            // Save new metric [NEW]
+DELETE /api/custom-metrics/:id        // Delete metric [NEW]
+GET    /api/artifacts                 // List saved runs
+GET    /api/artifacts/:id             // Fetch saved run
+POST   /api/generate-question         // AI question generator
+POST   /api/extract-metric-name       // AI metric naming
+GET    /*.(html|css|js|png|...)       // Static files
+```
+
+**Key Variables (Oct 2026):**
+
+```javascript
+const STATIC_CONCURRENCY = 3;         // Parallel prompts in static/suite mode
+const CUSTOM_METRICS_FILE = 'custom_metrics.json';
+const ALLOWED_EVAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', ...]);
+const BUILTIN_METRIC_KEYS = {         // Label → key mapping
+  'Answer Relevancy': 'answer_relevancy',
+  // ... 7 more
+};
+```
+
+**Environment Variables Used:**
+
+- `TEXT_MODEL_API_KEY`, `TEXT_MODEL_BASE_URL`, `TEXT_MODEL` — Chatbot model
+- `PORT` (default 3000), `HOST` (default 127.0.0.1) — Server binding
+- `ALLOWED_EVAL_HOSTS` — Chatbot URL allowlist (comma-separated)
+
+---
+
+### **evaluate_responses.py** — LLM Judge Engine 🔴
+
+**Purpose:** Scores chatbot responses using an LLM judge in isolated sessions, with stricter calibration and median scoring for borderline metrics.
+
+**Core Responsibilities:**
+
+1. Score each response via judge API in separate session
+2. Median scoring: if score ±0.1 of 75% bar, judge 3x and take median
+3. Graceful fallback to heuristics if judge unavailable
+4. Custom metrics support (user-defined scoring instructions)
+5. Reference matching for suite mode
+6. Per-response reasoning extraction
+
+**Key Functions:**
+
+| Function                     | Purpose                                                    | Returns                                |
+| ---------------------------- | ---------------------------------------------------------- | -------------------------------------- |
+| `call_judge()`             | Raw API call to judge model (2 retries)                    | `{scores: {...}, ...}`               |
+| `judge_once()`             | Single judge pass, extract scores from JSON                | `(scores_dict, reasons_dict)`        |
+| `judge_response()`         | Main orchestrator: single call + median if borderline      | `(scores, reasons, num_samples)`     |
+| `heuristic_scores()`       | Fallback: keyword overlap, toxic terms, regex metrics      | `(scores, reasons)`                  |
+| `heuristic_custom_score()` | Custom metric fallback: word-limit regex, keyword matching | `score (0.0-1.0)`                    |
+| `evaluate_one()`           | Score single response: try judge, fallback to heuristics   | `(scores, reasons, method, samples)` |
+| `evaluate_batch()`         | Main entry: parallel evaluation via ThreadPoolExecutor(4)  | Full JSON result                       |
+
+**Judge System Prompt (Oct 2026):**
+
+```python
+JUDGE_SYSTEM_PROMPT = """
+  You are a demanding, impartial evaluator...
+  Calibration anchors (use the whole scale):
+  1.0  flawless: ...
+  0.9  excellent with only cosmetic nitpicks
+  0.75 acceptable but with a clear, specific weakness
+  0.5  significant problems
+  0.25 mostly fails
+  0.0  completely fails
+  
+  For each metric, first identify the most important weakness (or state none),
+  then score. Return ONLY a JSON object: {"scores": {"<metric_key>": {"reason": "...", "score": <number>}}}
+"""
+```
+
+**Median Scoring (Oct 2026):**
+
+- If `BORDERLINE_MARGIN` (0.1) of `PASS_THRESHOLD` (0.75): score is ±0.75±0.1 = [0.65-0.85]
+- Judge 3 times, take median (reduces noise ~12 points/metric/run)
+- Track `judge_samples` per response: 1 (single) or 3 (borderline)
+
+**Input (stdin JSON):**
+
+```json
+{
+  "prompts": ["Q1", "Q2"],
+  "responses": ["R1", "R2"],
+  "custom_metrics": [{"id": "c1", "name": "Conciseness", "desc": "Under 200 words"}],
+  "selected_metrics": ["answer_relevancy", "faithfulness"],
+  "system_prompt": "You are a QA engineer",
+  "isolated": true,
+  "references": ["Expected answer 1", "Expected answer 2"]
+}
+```
+
+**Output (stdout JSON):**
+
+```json
+{
+  "individual_metrics": [
+    {"answer_relevancy": 0.95, "faithfulness": 0.92, "custom_c1": 1.0},
+    {"answer_relevancy": 1.0, "faithfulness": 0.98, "custom_c1": 0.8}
+  ],
+  "individual_reasons": [
+    {"answer_relevancy": "Directly addresses...", "custom_c1": "174 words, under 200"},
+    {"answer_relevancy": "Comprehensive...", "custom_c1": "189 words, under 200"}
+  ],
+  "judge_samples": [1, 3],
+  "aggregated_metrics": {
+    "answer_relevancy": {
+      "avg": 0.975,
+      "min": 0.95,
+      "max": 1.0,
+      "all": [0.95, 1.0],
+      "threshold": 0.75,
+      "passed": true,
+      "worst_reason": "Minor wording could be clearer"
+    },
+    "custom_c1": {
+      "avg": 0.9,
+      "min": 0.8,
+      "max": 1.0,
+      "threshold": 0.75,
+      "passed": true,
+      "worst_reason": "189 words, under 200"
+    }
+  },
+  "unmeasured_metrics": ["contextual_precision"],
+  "scoring_method": "llm_judge",
+  "judge_model": "deepseek-chat",
+  "overall_pass": true,
+  "metrics_passed": 2,
+  "metrics_total": 2
+}
+```
+
+**Heuristic Fallback (No Judge):**
+
+- **answer_relevancy:** keyword overlap (p ∩ r / |p|) + refusal detection (0.3-1.0)
+- **toxicity:** count toxic terms, 1.0 - (terms / max)
+- **custom metrics:** word-limit regex, keyword matching (concise/detailed/refusal/example)
+- **other metrics:** report as `unmeasured_metrics` (NOT fabricated)
+
+**Environment Variables:**
+
+- `JUDGE_MODEL`, `JUDGE_API_KEY`, `JUDGE_BASE_URL` — Use different judge (recommended)
+- Falls back to `TEXT_MODEL_*` if judge not set
+- `JUDGE_MAX_WORKERS` (default 4) — ThreadPoolExecutor pool size
+- `JUDGE_TIMEOUT_SECONDS` (default 120) — Judge API timeout
+
+---
+
+### **eval-cli.mjs** — CI Regression Gate 🟢 [NEW OCT 2026]
+
+**Purpose:** Command-line evaluation with regression detection for CI/CD pipelines. Exit codes guide build pass/fail.
+
+**Core Responsibilities:**
+
+1. Run evaluations from command line (dynamic/static/suite modes)
+2. Compare against baseline (previous run with same endpoint + suite/mode)
+3. Detect regressions: metric below 75% OR drops > max-drop points
+4. Exit with 0 (pass), 1 (gate failed), 2 (error)
+5. Generate JSON reports for CI artifacts
 
 **Key Features:**
-- ✅ Isolated evaluation sessions (separate from chat sessions)
-- ✅ 11+ built-in quality metrics
-- ✅ Custom business logic metrics
-- ✅ Golden + Synthetic datasets
-- ✅ Environment-specific configurations (QA/Prod)
-- ✅ Comprehensive reporting and monitoring
-- ✅ Enterprise-grade error handling
+
+- `--suite golden|edge_cases` — Fixed test suites (default: golden)
+- `--dynamic "question" --turns 5` — AI-generated follow-ups
+- `--prompts "q1|q2|..."` or `--prompts-file path.txt` — Static tests
+- `--baseline latest|none|runId` — Compare against (default: latest same suite/mode)
+- `--max-drop 10` — Fail if metric drops >10 points (default 10, typical variance ~12)
+- `--metrics "Answer Relevancy,Faithfulness"` or `all` (default all)
+- `--custom all|none|cm_abc123` — Include saved custom metrics
+- `--start-server` — Automatically start server.js, kill after run
+- `--out file.json` — Write JSON report for CI artifacts
+
+**Example Usage:**
+
+```bash
+npm run eval -- --suite golden --start-server --max-drop 5
+npm run eval -- --dynamic "Explain ML" --turns 3 --metrics "Answer Relevancy,Hallucination"
+npm run eval -- --prompts "What is AI?|What is ML?" --baseline none
+npm run eval -- --suite edge_cases --custom all --out results.json
+```
+
+**Output Format:**
+
+```
+Evaluating http://localhost:3000/api/chat with suite "golden"...
+
+Run eval_2026-10-06_19-30-14_a1b2c3 · scored by llm_judge (deepseek-chat)
+Baseline: eval_2026-10-06_19-25-45_x9y8z7 (10/6/2026, 7:25:45 pm)
+
+Metric                      Score   Base     Δ  Result
+Answer Relevancy              91%    92%    -1  PASS
+Faithfulness                  99%    97%    +2  PASS
+Reference Match               65%    60%    +5  FAIL
+
+Quality gate: FAILED
+  - Reference Match is 65% (below 75%)
+  - Reference Match dropped 5 points vs baseline (max 10)
+
+exit 1
+```
+
+**Exit Codes:**
+
+- `0` — Gate passed (all metrics ≥75%, drops ≤max-drop)
+- `1` — Gate failed (metrics below threshold or excessive regression)
+- `2` — Error (bad args, server unreachable, metric not found, etc.)
+
+**Baseline Logic (Oct 2026):**
+Finds previous run where:
+
+- `scoring_method ≠ 'legacy'` (excludes old fixed-score runs)
+- `evaluationMode === current_mode` (dynamic/static/suite match)
+- `suiteId === current_suite` (if suite mode: same suite)
+- `apiEndpoint === current_endpoint` (same chatbot being tested)
+- Picks most recent; if `--baseline` specifies run ID, validates it exists
 
 ---
 
-## 📁 Directory Structure
+### **public/deepeval.html** — Evaluation Dashboard 🟢 [MAJOR UPDATE OCT 2026]
 
+**Purpose:** Web UI for configuring evaluations, viewing results, managing suites/custom metrics, and tracking trends.
+
+**6 Main Tabs:**
+
+1. **Conversation** — Chat history from last evaluation run
+2. **Quality Metrics** — Metric cards (Score/Pass badge with judge reasoning), Radar chart, Bar chart
+3. **Analysis** — Evaluation config table, scoring method, failed responses
+4. **Export** — PDF report download, JSON export
+5. **Artifacts** — Run history with comparison vs previous run, 15-run trend chart
+6. **Settings** — Custom metric library management
+
+**Key Features (Oct 2026):**
+
+| Feature                | Location            | Implementation                                                                              |
+| ---------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
+| Evaluation modes       | Dropdown            | Dynamic/Static/Suite selection                                                              |
+| Test suites            | Suite mode UI       | Loads from`GET /api/suites`, displays case count + categories                             |
+| Metric selection       | Checkboxes          | 8 built-in + custom + reference_match (for suites)                                          |
+| Custom metrics         | Input + library     | Add (POST /api/custom-metrics) / Delete (DELETE /api/custom-metrics/:id) [server-persisted] |
+| Progress streaming     | Progress bar        | Consumes SSE, shows real-time percent + message                                             |
+| Metric cards           | Quality Metrics tab | Name, score%, Pass/Fail badge, worst_reason (judge explanation)                             |
+| Per-response breakdown | Quality Metrics tab | Expandable rows: prompt, response, expected answer (suites), each metric + reason [NEW]     |
+| Radar/bar charts       | Charts section      | Multi-dimensional view with 75% threshold line                                              |
+| Run comparison         | Artifacts tab       | Previous run of same suite/mode → delta % + colored badge per metric [NEW]                 |
+| Trend chart            | Artifacts tab       | Last 15 judge-scored runs: line chart avg score + pass rate vs 75% bar [NEW]                |
+| PDF export             | Export tab          | 4+ pages: config, summary, conversation, per-response reasons, best/worst                   |
+| JSON export            | Export tab          | Actual run data (conversationId, scores, custom metrics, etc.)                              |
+
+**Per-Response Breakdown (Oct 2026):**
+
+```html
+<details>
+  <summary>
+    #1 · golden_001 What is artificial intelligence?
+    [Chip1: 90%] [Chip2: 95%] [Chip3: 100%]
+  </summary>
+  <div>
+    <div>Expected: Should cover: machines, learning, data...</div>
+    <div>Response: **Artificial intelligence (AI)** is the field...</div>
+    <table>
+      <tr><td>Answer Relevancy</td><td>90%</td><td>Directly addresses but...</td></tr>
+      <tr><td>Faithfulness</td><td>95%</td><td>Claims are accurate...</td></tr>
+    </table>
+  </div>
+</details>
 ```
-deepeval/
-├── evaluation/           # Core evaluation engine
-│   ├── engine.py        # Main evaluation orchestrator
-│   ├── metrics.py       # Custom business metrics
-│   └── __init__.py
-├── datasets/            # Test data organized by type
-│   ├── golden/          # Human-verified production data
-│   │   ├── quality_qa_set.py
-│   │   └── __init__.py
-│   ├── synthetic/       # Auto-generated edge cases
-│   │   ├── edge_cases.py
-│   │   └── __init__.py
-│   └── test/            # User acceptance test data
-│       └── __init__.py
-├── tests/               # Pytest test files
-│   ├── test_quality.py
-│   ├── test_consistency.py
-│   ├── test_edge_cases.py
-│   ├── conftest.py      # Pytest fixtures
-│   └── __init__.py
-├── config/              # Environment configurations
-│   ├── qa.py            # QA environment settings
-│   ├── prod.py          # Production settings
-│   └── __init__.py
-├── reports/             # Evaluation results
-│   ├── runs/            # Individual evaluation runs
-│   └── custom/          # Custom report artifacts
-├── utils/               # Shared utilities
-│   ├── reporters.py     # Report generation
-│   ├── validators.py    # Input validation
-│   └── __init__.py
-├── ci/                  # CI/CD configuration
-│   └── github_actions.yml
-├── logs/                # Application logs
-└── __init__.py
+
+**Custom Metrics (Oct 2026):**
+
+- Load on page init from `GET /api/custom-metrics`
+- Add: fill description → `POST /api/custom-metrics` (server extracts name) → save to `custom_metrics.json`
+- Delete: click ✕ button → `DELETE /api/custom-metrics/:id` → remove from library
+- Persist across page reloads (server-side storage)
+- Display with 🎯 icon in metrics list
+
+**Run Comparison (Oct 2026):**
+
+- Loads previous run (same endpoint + suite/mode)
+- Metric-by-metric comparison: Previous | This Run | Δ (points) | color-coded badge
+- Example: "Answer Relevancy: 92% → 91% (Δ -1), Faithfulness: 97% → 99% (Δ +2)"
+
+**History Trend (Oct 2026):**
+
+- Filters to last 15 judge-scored runs (excludes legacy)
+- Line chart: X-axis = run date, Y-axis = score (0-100%)
+- Shows avg score + pass rate lines, 75% threshold reference
+- Helps spot gradual degradation over time
+
+**Key Variables/Structures:**
+
+```javascript
+currentEvaluation = {
+  conversationId,
+  evaluationMode: 'dynamic|static|suite',
+  suiteId, suiteName,
+  prompts: [],
+  responses: [],
+  qualityMetrics: {
+    "answer_relevancy": {
+      avg, min, max, passed, worst_reason, ...
+    }
+  },
+  individualMetrics: [{ answer_relevancy: 0.9, ... }, ...],
+  individualReasons: [{ answer_relevancy: "...", ... }, ...],
+  evaluatedIndices: [0, 1],
+  failedResponses: [{ index, error }, ...],
+  scoringMethod: 'llm_judge|heuristic|mixed',
+  judgeModel,
+  overallPass
+};
+
+customMetrics = [
+  { id: 'cm_abc123', name: 'Conciseness', desc: '...', createdAt: '...' }
+];
 ```
+
+**Key Functions:**
+
+- `runDeepEval()` — Main orchestrator
+- `displayMetrics()` — Render cards + charts
+- `displayResponseBreakdown()` — Per-response table
+- `loadSuites()` — Fetch test suite list
+- `loadCustomMetricLibrary()` — Load saved metrics from server
+- `addCustomMetric()` — POST new metric
+- `removeCustomMetric()` — DELETE metric
+- `renderRunComparison()` — Previous vs current comparison
+- `renderHistoryTrend()` — 15-run line chart
+- `generatePDF()` — html2canvas → jsPDF (with scrollX:0, scrollY:0 fix)
 
 ---
 
-## 🔍 File Purpose Reference
+### **deepeval/datasets/export_suites.py** — Suite Loader 🟢 [NEW OCT 2026]
 
-### Core Evaluation Engine
+**Purpose:** Load golden and edge-case datasets from Python files, export as JSON for server.js.
 
-#### `deepeval/evaluation/engine.py` (Main Module)
+**Key Functions:**
 
-**Purpose:** Isolated evaluation system with separate LLM judge session
+- `golden_suite()` — Returns golden Q&A cases with reference field
+- `edge_suite()` — Returns edge-case questions with expected behaviors
+- Output: JSON list of suites
 
-**Key Classes:**
+**Output Format (used by server.js):**
 
-1. **`EvaluationSession`** (Dataclass)
-   - Represents an isolated evaluation session
-   - Properties: `session_id`, `purpose`, `timestamp`, `model`
-   - Ensures separation from chat sessions
-
-2. **`IsolatedEvaluator`** (Main Class)
-   ```python
-   evaluator = IsolatedEvaluator(eval_model="gpt-4", judge_temperature=0.0)
-   ```
-
-   **Key Methods:**
-   - `compute_heuristic_metrics(prompt, response)` → Dict[str, float]
-     - Fallback when DeepEval unavailable
-     - Statistical analysis, no LLM dependency
-   
-   - `evaluate_single(prompt, response, retrieval_context)` → Dict[str, Any]
-     - Evaluate one prompt-response pair
-     - Returns 11 metric scores (0-1 scale)
-   
-   - `evaluate_batch(prompts, responses, retrieval_contexts)` → Dict[str, Any]
-     - Batch evaluation with aggregation
-     - Returns individual + aggregated metrics
-
-**Metrics Provided:**
-- ✅ Answer Relevancy (0-1)
-- ✅ Faithfulness (0-1)
-- ✅ Contextual Precision (0-1)
-- ✅ Contextual Recall (0-1)
-- ✅ Contextual Relevancy (0-1)
-- ✅ Hallucination Detection (0-1)
-- ✅ Toxicity Analysis (0-1)
-- ✅ Summarization Accuracy (0-1)
-- ✅ Response Length (0-1)
-- ✅ Completeness (0-1)
-- ✅ Clarity (0-1)
-
-**Usage:**
 ```python
-from deepeval.evaluation.engine import IsolatedEvaluator
-
-evaluator = IsolatedEvaluator()
-result = evaluator.evaluate_batch(
-    prompts=["What is AI?", "Explain ML"],
-    responses=[resp1, resp2]
-)
-print(result["aggregated_metrics"])
+[
+  {
+    "id": "golden",
+    "name": "Golden Quality Q&A Set",
+    "description": "Human-reviewed production-quality examples",
+    "cases": [
+      {
+        "id": "golden_001",
+        "category": "general_knowledge",
+        "prompt": "What is artificial intelligence?",
+        "reference": "Should cover: machines, learning, data, decision, algorithm. Length: 30-200 words."
+      }
+    ]
+  },
+  {
+    "id": "edge_cases",
+    "name": "Edge Case & Synthetic Test Set",
+    "description": "Programmatically generated edge cases",
+    "cases": [
+      {
+        "id": "edge_empty_001",
+        "category": "empty",
+        "prompt": "",
+        "reference": "Should request clarification"
+      }
+    ]
+  }
+]
 ```
+
+**Note:** Loads by file path, avoids importing `deepeval` package (which shadows pip library).
 
 ---
 
-#### `deepeval/evaluation/metrics.py` (Custom Metrics)
+### **deepeval/datasets/golden/quality_qa_set.py**
 
-**Purpose:** Business-specific metrics beyond built-in DeepEval metrics
+**Purpose:** Human-reviewed baseline Q&A pairs defining production-quality responses.
 
-**Key Classes:**
+**Contains:** 5 golden questions with:
 
-1. **`ResponseConsistencyMetric`**
-   - Evaluates consistency across multiple responses to same query
-   - Ensures chatbot is reliable and non-contradictory
-   - Returns: `MetricResult` with score and reasoning
-
-2. **`ToolCallAccuracyMetric`**
-   - Verifies tool/function calls match user request
-   - Critical for agent-based chatbots
-   - Returns: Accuracy score 0-1
-
-3. **`ResponseLatencyMetric`**
-   - Measures response generation time
-   - Threshold: 3000ms (configurable)
-   - Returns: Performance score 0-1
-
-4. **`ContextRelevanceMetric`**
-   - Checks if response properly uses retrieved context
-   - Prevents context waste/hallucination
-   - Returns: Relevance score 0-1
-
-5. **`SafetyComplianceMetric`**
-   - Detects forbidden patterns (credentials, PII, etc.)
-   - Critical for production safety
-   - Returns: Binary pass/fail
-
-**Evaluation Result Structure:**
-```python
-@dataclass
-class MetricResult:
-    name: str              # e.g., "response_consistency"
-    score: float           # 0.0-1.0
-    reasoning: str         # Why this score
-    passed: bool           # Metric threshold met
-```
-
-**Usage:**
-```python
-from deepeval.evaluation.metrics import ResponseLatencyMetric
-
-metric = ResponseLatencyMetric(threshold_ms=3000)
-result = metric.measure(response_time_ms=2500)
-assert result.passed  # True if under threshold
-```
-
----
-
-### Datasets
-
-#### `deepeval/datasets/golden/quality_qa_set.py`
-
-**Purpose:** Human-reviewed reference data for baseline evaluation
-
-**Data Structure:**
 ```python
 {
     "id": "golden_001",
-    "category": "general_knowledge",
+    "category": "general_knowledge|technical_accuracy|practical_application|edge_case|multi_turn",
     "question": "What is artificial intelligence?",
-    "expected_elements": ["machines", "learning", ...],
+    "expected_elements": ["machines", "learning", "data", "decision", "algorithm"],
     "min_length_words": 30,
     "max_length_words": 200,
     "should_cite_sources": False,
-    "difficulty": "easy"
+    "difficulty": "easy|medium|hard"
 }
 ```
 
-**Usage:**
-```python
-from deepeval.datasets.golden.quality_qa_set import load_golden_dataset
+**Used By:**
 
-dataset = load_golden_dataset()
-for question in dataset["questions"]:
-    response = chatbot(question["question"])
-    evaluate(response, question)
-```
-
-**Categories:**
-- `general_knowledge` - Basic Q&A comprehension
-- `technical_accuracy` - Precise technical responses
-- `practical_application` - Real-world use cases
-- `edge_case` - Boundary condition handling
-- `multi_turn` - Multi-step conversations
+- Suite mode evaluation (Reference Match metric)
+- CI regression gate (--suite golden)
+- Historical baseline comparison
 
 ---
 
-#### `deepeval/datasets/synthetic/edge_cases.py`
+### **deepeval/datasets/synthetic/edge_cases.py**
 
-**Purpose:** Auto-generated edge cases and stress tests
+**Purpose:** Auto-generated edge cases testing robustness and error handling.
 
-**Case Categories:**
+**Contains:** 15+ cases across 6 categories:
 
-1. **Empty/Null Cases**
-   - Empty strings, None values, whitespace only
-   - Validates error handling
+1. Empty/Null (3) — "", None, whitespace
+2. Length Boundary (3) — 2 chars, 500 words, 10k repeated
+3. Encoding (3) — Unicode, emojis, special chars
+4. Adversarial (3) — Impossible, contradictions, ambiguity
+5. Performance (2) — Heavy computation, recursion
+6. Security (2) — Prompt injection, SQL injection strings
 
-2. **Length Boundary Cases**
-   - Very short (2 chars) to very long (10k chars)
-   - Tests scalability limits
+**Each case includes:**
 
-3. **Encoding Cases**
-   - Unicode, emojis, special characters
-   - Multi-language support verification
-
-4. **Adversarial Cases**
-   - Factually impossible scenarios
-   - Logical contradictions
-   - Highly ambiguous inputs
-
-5. **Performance Cases**
-   - Heavy computational requests
-   - Recursive/circular references
-
-6. **Security Cases**
-   - Prompt injection attempts
-   - SQL injection-like strings
-   - Tests safety measures
-
-**Usage:**
 ```python
-from deepeval.datasets.synthetic.edge_cases import load_edge_case_dataset
-
-dataset = load_edge_case_dataset()
-for case in dataset["test_cases"]:
-    # Test against each edge case
-    response = chatbot(case["question"])
-    validate_expected_behavior(response, case)
+{
+    "id": "edge_empty_001",
+    "question": "",
+    "description": "Empty question string",
+    "expected_behavior": "should request clarification"
+}
 ```
+
+**Used By:**
+
+- Suite mode evaluation (Reference Match metric)
+- CI regression gate (--suite edge_cases)
+- Edge-case robustness testing
 
 ---
 
-### Configuration
+### **deepeval/config/qa.py & prod.py**
 
-#### `deepeval/config/qa.py` (QA Environment)
+**Purpose:** Environment-specific configuration (both now unified at 75% per metric).
 
-**Purpose:** Settings for development and testing
-
-**Key Settings:**
+**Key Contents:**
 
 ```python
-EVAL_MODEL = "gpt-4"
-JUDGE_TEMPERATURE = 0.0        # Deterministic scoring
+# Both files now set METRIC_THRESHOLDS = {metric: 0.75 for all}
+METRIC_THRESHOLDS = {
+    "answer_relevancy": 0.75,
+    "faithfulness": 0.75,
+    # ... all set to 0.75 (unified Oct 2026)
+}
 
-# Evaluation
+# QA: Sequential, verbose
 EVALUATION_CONFIG = {
     "timeout_seconds": 300,
     "max_retries": 3,
-    "parallel_evaluations": False,  # Sequential debugging
+    "parallel_evaluations": False,
 }
 
-# Thresholds (Lower in QA for development)
-METRIC_THRESHOLDS = {
-    "answer_relevancy": 0.70,
-    "hallucination": 0.80,
-    "safety_compliance": 0.95,
-    # ... more metrics
-}
-
-# Datasets
-DATASET_CONFIG = {
-    "golden": {
-        "enabled": True,
-        "min_pass_rate": 0.85,  # 85% must pass
-    },
-    "synthetic": {
-        "enabled": True,
-        "min_pass_rate": 0.70,  # 70% must pass
-    },
-}
-```
-
-**Usage:**
-```python
-from deepeval.config.qa import get_qa_config
-
-config = get_qa_config()
-evaluator = IsolatedEvaluator(
-    eval_model=config["eval_model"],
-    judge_temperature=config["judge_temperature"]
-)
-```
-
----
-
-#### `deepeval/config/prod.py` (Production Environment)
-
-**Purpose:** Strict settings for production deployments
-
-**Key Differences from QA:**
-
-```python
-# Stricter thresholds
-METRIC_THRESHOLDS = {
-    "answer_relevancy": 0.80,      # +0.10 from QA
-    "hallucination": 0.90,         # +0.10 from QA
-    "safety_compliance": 0.99,     # +0.04 from QA
-}
-
-# Parallel execution for speed
+# Prod: Parallel, minimal
 EVALUATION_CONFIG = {
+    "timeout_seconds": 300,
     "parallel_evaluations": True,
     "batch_size": 50,
-    "use_cache": True,
 }
 
-# Higher pass rates required
+# Dataset pass-rate targets (differ by env)
 DATASET_CONFIG = {
-    "golden": {
-        "min_pass_rate": 0.95,  # 95% (vs 85% in QA)
-    },
-    "synthetic": {
-        "min_pass_rate": 0.85,  # 85% (vs 70% in QA)
-    },
-}
-
-# Alerting enabled
-ALERT_CONFIG = {
-    "alert_on_metric_drop": True,
-    "metric_drop_threshold": 0.05,
+    "golden": {"min_pass_rate": 0.85},  # QA
+    "golden": {"min_pass_rate": 0.95},  # Prod
 }
 ```
 
 ---
 
-### Tests
+### **deepeval/tests/conftest.py**
 
-#### `deepeval/tests/conftest.py`
+**Purpose:** Pytest fixtures shared across all test files.
 
-**Purpose:** Pytest fixtures shared across all tests
+**Provides:**
 
-**Key Fixtures:**
+- `evaluator` — IsolatedEvaluator instance
+- `qa_config`, `prod_config` — Configuration objects
+- `golden_dataset` — Golden Q&A set
+- `edge_cases` — Edge-case dataset
 
-```python
-@pytest.fixture
-def evaluator():
-    """Isolated evaluator instance"""
-    return IsolatedEvaluator(eval_model="gpt-4")
-
-@pytest.fixture
-def qa_config():
-    """Load QA configuration"""
-    from deepeval.config.qa import get_qa_config
-    return get_qa_config()
-
-@pytest.fixture
-def golden_dataset():
-    """Load golden dataset"""
-    from deepeval.datasets.golden.quality_qa_set import load_golden_dataset
-    return load_golden_dataset()
-
-@pytest.fixture
-def edge_cases():
-    """Load edge case dataset"""
-    from deepeval.datasets.synthetic.edge_cases import load_edge_case_dataset
-    return load_edge_case_dataset()
-```
+**Usage:** Used by test files to avoid redundant setup.
 
 ---
 
-#### `deepeval/tests/test_quality.py`
+### **package.json** — npm Scripts & Dependencies
 
-**Purpose:** Test chatbot quality against golden dataset
+**Key Scripts:**
 
-**Test Structure:**
-```python
-def test_answer_relevancy(evaluator, golden_dataset):
-    """Verify answer relevancy meets threshold"""
-    for question in golden_dataset["questions"]:
-        response = chatbot(question["question"])
-        metrics = evaluator.evaluate_single(
-            question["question"],
-            response
-        )
-        assert metrics["answer_relevancy"] >= 0.70
-
-def test_consistency(evaluator):
-    """Verify responses are consistent"""
-    question = "What is machine learning?"
-    responses = [chatbot(question) for _ in range(3)]
-    # All responses should be similar
-```
-
----
-
-#### `deepeval/tests/test_edge_cases.py`
-
-**Purpose:** Test handling of edge cases and error conditions
-
-```python
-def test_empty_input(evaluator):
-    """Chatbot should handle empty input gracefully"""
-    response = chatbot("")
-    assert response is not None
-    assert len(response) > 0
-
-def test_long_input(evaluator):
-    """Chatbot should handle very long input"""
-    long_question = "word " * 500
-    response = chatbot(long_question)
-    # Should not timeout or crash
-
-def test_unicode_input(evaluator):
-    """Support multi-language input"""
-    response = chatbot("什么是人工智能?")  # Chinese
-    assert response is not None
-```
-
----
-
-### Reports
-
-#### `deepeval/reports/` Directory Structure
-
-```
-reports/
-├── runs/
-│   ├── 2024-09-26_qa_run_001.json
-│   ├── 2024-09-26_qa_run_002.json
-│   └── 2024-09-26_prod_run_001.json
-└── custom/
-    ├── regression_analysis.md
-    ├── monthly_summary.html
-    └── comparative_report.pdf
-```
-
-**Report Contents:**
 ```json
 {
-  "evaluation_session": {
-    "session_id": "abc123",
-    "purpose": "quality_evaluation",
-    "timestamp": "2024-09-26T10:30:00Z",
-    "model": "gpt-4"
+  "scripts": {
+    "start": "node server.js",
+    "test:metrics": "node test-metrics.js",
+    "eval": "node eval-cli.mjs",
+    "verify": "bash verify-setup.sh"
   },
-  "individual_metrics": [
-    {
-      "answer_relevancy": 0.85,
-      "faithfulness": 0.92,
-      ...
-    }
-  ],
-  "aggregated_metrics": {
-    "answer_relevancy": {
-      "avg": 0.85,
-      "min": 0.75,
-      "max": 0.95,
-      "all": [0.85, 0.92, ...]
-    }
+  "dependencies": {
+    "express": "^4.x",
+    "axios": "^1.x",
+    "dotenv": "^16.x",
+    "html2canvas": "^1.x",
+    "jspdf": "^2.x"
   }
 }
 ```
 
 ---
 
-## 🔄 Data Flow Diagram
+### **.env** — Environment Variables Template
+
+**Required:**
 
 ```
-User Query
-    ↓
-Chatbot (Chat Session)
-    ↓
-Response Generated
-    ↓
-Evaluation Triggered
-    ↓
-[Isolated Evaluation Session]
-    ├── Python Engine (evaluate_responses.py)
-    ├── Uses Different Session
-    ├── Separate API Key (Optional)
-    ├── Independent Judge LLM
-    └── Objective Scoring
-    ↓
-Metrics Computed
-    ├── Built-in DeepEval Metrics (8)
-    ├── Custom Business Metrics (5)
-    └── Aggregated Results
-    ↓
-Report Generation
-    ├── JSON Report
-    ├── CSV Export
-    └── Dashboard Update
-    ↓
-Storage & Notification
+TEXT_MODEL_API_KEY=sk-xxx
+TEXT_MODEL_BASE_URL=https://api.deepseek.com/v1
+TEXT_MODEL=deepseek-chat
+```
+
+**Optional:**
+
+```
+PORT=3000
+HOST=127.0.0.1
+JUDGE_MODEL=deepseek-chat          # Different judge model (recommended)
+JUDGE_API_KEY=sk-yyy
+JUDGE_BASE_URL=https://api.deepseek.com/v1
+ALLOWED_EVAL_HOSTS=localhost,192.168.1.100
 ```
 
 ---
 
-## 🚀 Quick Start Usage
+### **artifacts/** — Evaluation Runs Storage
 
-### 1. Setup (One Time)
+**Contains:** `eval_*.json` files (one per run).
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+**Filename Format:** `eval_YYYY-MM-DD_HH-mm-ss_XXXXXX.json` (random suffix ensures uniqueness even within same second)
 
-# Verify setup
-npm run verify
-```
+**Contents:**
 
-### 2. Run Evaluation
-
-```python
-from deepeval.evaluation.engine import IsolatedEvaluator
-
-# Initialize
-evaluator = IsolatedEvaluator()
-
-# Evaluate batch
-result = evaluator.evaluate_batch(
-    prompts=["What is AI?", "Explain ML"],
-    responses=["AI is...", "ML is..."]
-)
-
-# Access results
-print(result["aggregated_metrics"]["answer_relevancy"])
-```
-
-### 3. Load Datasets
-
-```python
-from deepeval.datasets.golden.quality_qa_set import load_golden_dataset
-from deepeval.datasets.synthetic.edge_cases import load_edge_case_dataset
-
-golden = load_golden_dataset()
-edge_cases = load_edge_case_dataset()
-
-for question in golden["questions"]:
-    # Test against golden data
-    pass
-
-for case in edge_cases["test_cases"]:
-    # Test against edge cases
-    pass
-```
-
-### 4. Run Tests
-
-```bash
-# Run all tests
-pytest deepeval/tests/
-
-# Run specific test file
-pytest deepeval/tests/test_quality.py -v
-
-# Run with QA config
-pytest deepeval/tests/ --config qa
-
-# Run with prod config
-pytest deepeval/tests/ --config prod
+```json
+{
+  "conversationId": "eval_2026-10-06_19-30-14_a1b2c3",
+  "conversations": [...],
+  "metrics": {
+    "prompts": [...],
+    "responses": [...],
+    "qualityMetrics": {
+      "answer_relevancy": { "avg": 0.95, "passed": true, "worst_reason": "..." },
+      ...
+    },
+    "individualMetrics": [...],
+    "individualReasons": [...],
+    "judgeSamples": [1, 3, 1],
+    "evaluatedIndices": [0, 1, 2],
+    "failedResponses": [],
+    "evaluationMode": "suite",
+    "suiteId": "golden",
+    "scoringMethod": "llm_judge",
+    "judgeModel": "deepseek-chat",
+    "overallPass": true,
+    ...
+  },
+  "createdAt": "2026-10-06T19:30:14.000Z"
+}
 ```
 
 ---
 
-## 📊 Metric Categories
+### **custom_metrics.json** — Custom Metric Library 🟢 [NEW OCT 2026]
 
-### Group 1: Response Quality (4 metrics)
-- Answer Relevancy
-- Faithfulness
-- Clarity
-- Completeness
+**Purpose:** Server-side persistence of user-defined metrics (survives page reload).
 
-### Group 2: Context Awareness (3 metrics)
-- Contextual Precision
-- Contextual Recall
-- Contextual Relevancy
+**Format:**
 
-### Group 3: Safety & Fairness (3 metrics)
-- Hallucination Detection
-- Toxicity Analysis
-- Safety Compliance
-
-### Group 4: Custom Business Metrics (5 metrics)
-- Response Consistency
-- Tool Call Accuracy
-- Response Latency
-- Context Relevance
-- Safety Compliance
-
----
-
-## 🔒 Key Design Principles
-
-### 1. Isolated Evaluation Sessions
-
-**Problem Solved:** Chat session biases evaluation
-
-**Solution:** Separate LLM judge instance
-- Different API key (optional)
-- Independent session ID
-- No conversation history leakage
-- Objective scoring environment
-
-### 2. Dual-Mode Metrics
-
-**Problem Solved:** Dependency on DeepEval library
-
-**Solution:** Graceful degradation
-- Try DeepEval first (if available)
-- Fall back to heuristic metrics
-- Consistent output format
-- No service disruption
-
-### 3. Environment-Specific Configs
-
-**Problem Solved:** Different QA vs Prod needs
-
-**Solution:** Separate configuration files
-- QA: Lower thresholds, sequential execution
-- Prod: Strict thresholds, parallel execution
-- Extensible configuration system
-- Easy environment switching
-
-### 4. Comprehensive Datasets
-
-**Problem Solved:** What to test?
-
-**Solution:** Golden + Synthetic
-- Golden: Baseline production quality
-- Synthetic: Edge cases and stress tests
-- Organized by purpose
-- Easy to extend
-
----
-
-## 📈 Integration Points
-
-### 1. Chat Server Integration
-- Call Python evaluation engine from Node.js
-- Pass prompts and responses
-- Receive JSON metrics
-- Store in evaluation database
-
-### 2. Dashboard Integration
-- Display metrics in web UI
-- Visualize with charts
-- Track historical trends
-- Compare evaluation runs
-
-### 3. CI/CD Integration
-- Run tests on every PR
-- Block merge on metric failure
-- Generate reports
-- Notify team on regressions
-
-### 4. Monitoring Integration
-- Track metrics over time
-- Alert on performance drops
-- Generate compliance reports
-- Feed into analytics
-
----
-
-## 🛠️ Extension Points
-
-### Add Custom Metric
-
-```python
-# In deepeval/evaluation/metrics.py
-class MyCustomMetric:
-    def __init__(self, threshold=0.75):
-        self.threshold = threshold
-    
-    def measure(self, response, context):
-        # Your logic
-        return MetricResult(
-            name="my_metric",
-            score=0.85,
-            reasoning="why this score",
-            passed=True
-        )
+```json
+[
+  {
+    "id": "cm_1726000614xyz",
+    "name": "Conciseness",
+    "desc": "Response should be concise, under 200 words",
+    "createdAt": "2026-10-06T19:30:14.000Z"
+  },
+  {
+    "id": "cm_1726000620abc",
+    "name": "Actionability",
+    "desc": "Response must give concrete, actionable steps with examples",
+    "createdAt": "2026-10-06T19:30:20.000Z"
+  }
+]
 ```
 
-### Add New Dataset
+**Management:**
 
-```python
-# In deepeval/datasets/custom/
-def load_custom_dataset():
-    return {
-        "name": "Custom Test Set",
-        "questions": [...],
-        "total_questions": 10,
-    }
+- Max 50 metrics per library
+- Auto-generated unique ID: `cm_` + timestamp.toString(36) + random hex
+- Loaded at dashboard startup, never lost on page reload
+- Editable via dashboard UI or direct file edit
+
+---
+
+## 🔄 Data Flow & Integration
+
+### Evaluation Flow (Oct 2026)
+
+```
+User opens deepeval.html
+        ↓
+Loads suites (GET /api/suites) + custom metrics (GET /api/custom-metrics)
+        ↓
+User configures: mode (dynamic/static/suite), prompts, metrics, system prompt
+        ↓
+Click "Run DeepEval" → POST /api/deepeval (JSON)
+        ↓
+server.js validates endpoint, loads suite if needed
+        ↓
+Collects responses from chatbot:
+  - Dynamic: 1 conversation, each prompt sent once, AI-generates follow-ups
+  - Static: multiple conversations in parallel (STATIC_CONCURRENCY=3)
+  - Suite: test cases in parallel, 1 conversation each
+        ↓
+Sends responses to evaluate_responses.py via stdin
+        ↓
+Python: Judge each response in isolated session
+  - If borderline (±0.1 of 0.75): judge 3×, take median
+  - Fallback heuristics if judge unavailable
+  - Return scores + per-response reasoning
+        ↓
+server.js aggregates, saves to artifacts/, sends complete event (SSE)
+        ↓
+deepeval.html renders:
+  - Metric cards with worst_reason tooltip
+  - Per-response breakdown with expected answers + judge reasoning
+  - Comparison with previous run (same suite/mode)
+  - Trend chart of last 15 runs
+  - Export to PDF or JSON
 ```
 
-### Add New Test
+### Custom Metric Flow (Oct 2026)
 
-```python
-# In deepeval/tests/test_custom.py
-def test_my_scenario(evaluator, custom_dataset):
-    for question in custom_dataset["questions"]:
-        response = chatbot(question)
-        metrics = evaluator.evaluate_single(question, response)
-        assert metrics["my_metric"] >= 0.75
+```
+User fills "Response should be under 200 words"
+        ↓
+Click "Add Metric" → POST /api/extract-metric-name
+        ↓
+LLM extracts name: "Conciseness"
+        ↓
+Server saves to custom_metrics.json, assigns unique ID
+        ↓
+Dashboard shows metric in checkboxes with 🎯 icon
+        ↓
+User checks it and runs evaluation
+        ↓
+Python judge receives custom instruction:
+  "custom_abc123 (Conciseness): measure how well response satisfies:
+   'Response should be under 200 words'"
+        ↓
+Judge scores metric, returns score + reason
+        ↓
+Dashboard displays card: "🎯 Conciseness 85% PASS"
+        ↓
+On page reload: custom metrics reloaded from custom_metrics.json (NOT lost)
+```
+
+### CLI Regression Gate Flow (Oct 2026)
+
+```
+npm run eval -- --suite golden --start-server --max-drop 10
+        ↓
+Starts server.js, waits for /api/health
+        ↓
+Runs golden suite evaluation
+        ↓
+Fetches previous golden runs from /api/artifacts
+        ↓
+Finds baseline: most recent golden run (same endpoint)
+        ↓
+Compares metrics: score vs baseline, calculates Δ
+        ↓
+Fails if:
+  - Any metric < 75%
+  - Any metric Δ > 10 points
+  - Any chatbot call failed
+        ↓
+Prints table: Metric | Score | Baseline | Δ | Result
+        ↓
+Exits 0 (pass) or 1 (fail)
+        ↓
+If --out specified: writes JSON report
 ```
 
 ---
 
-## 🎯 Best Practices
+## 🛠️ Key Implementation Patterns
 
-1. **Always use isolated evaluator** - Never reuse chat session for evaluation
-2. **Run golden tests regularly** - Catch regressions early
-3. **Test edge cases** - Don't only test happy path
-4. **Monitor metrics** - Track trends over time
-5. **Version datasets** - Keep historical test data
-6. **Review failures** - Understand why metrics dropped
-7. **Update thresholds** - Adjust as quality improves
-8. **Document metrics** - Explain why each threshold matters
+### Pattern: Adding a Built-in Metric
+
+1. Add definition to `BUILTIN_METRICS` dict in `evaluate_responses.py`
+2. Add to `BUILTIN_METRIC_KEYS` map in `server.js`
+3. Include in `JUDGE_SYSTEM_PROMPT` instruction
+4. Test via `evaluate_responses.py` directly
+
+### Pattern: Adding a Custom Metric (User-Facing)
+
+1. User fills description in dashboard
+2. `POST /api/custom-metrics` (name extracted by LLM)
+3. Saved to `custom_metrics.json` + loaded on next page init
+4. Included in `selected_metrics` when running evaluation
+5. Python judge receives as instruction: `custom_{id}: {description}`
+
+### Pattern: Adding a Suite Case
+
+1. Edit `deepeval/datasets/golden/quality_qa_set.py` or `edge_cases.py`
+2. Add entry with `id`, `prompt`, `reference` (expected answer)
+3. `export_suites.py` automatically includes in output
+4. Suite mode evaluation scores against reference
+
+### Pattern: Median Scoring (Oct 2026)
+
+1. Judge scores response once
+2. If score in [0.65, 0.85] (±0.1 of 0.75):
+   - Schedule 2 more judgments
+   - Collect 3 scores total
+   - Take median
+3. Track as `judge_samples = 3` (vs 1 for non-borderline)
+
+### Pattern: Parallel Static Execution
+
+1. Collect all test cases
+2. Call `mapWithConcurrency(cases, STATIC_CONCURRENCY, async fn)`
+3. Each case runs in own conversation (prevents contamination)
+4. Results assembled back in order
+5. All sent to Python at once for scoring
 
 ---
 
-## 📞 Support & Troubleshooting
+## 📊 Metrics & Thresholds (Oct 2026)
 
-**Q: DeepEval not installing?**
-A: System will fall back to heuristic metrics automatically.
+**Unified Bar:** All 13 metrics use 0.75 (both QA and Prod).
 
-**Q: Evaluation too slow?**
-A: Enable `parallel_evaluations` in prod config.
-
-**Q: Metrics seem low?**
-A: Check if thresholds are realistic; adjust dataset expectations.
-
-**Q: How to add new metric?**
-A: See "Extension Points" section above.
+| Metric                   | Measures                    | Fallback                            | Best Effort |
+| ------------------------ | --------------------------- | ----------------------------------- | ----------- |
+| Answer Relevancy         | Addresses question directly | Keyword overlap + refusal detection | Judge       |
+| Faithfulness             | Facts accurate              | None (needs judge)                  | Judge       |
+| Contextual Precision     | Only relevant context used  | None (needs judge)                  | Judge       |
+| Contextual Recall        | All context covered         | None (needs judge)                  | Judge       |
+| Contextual Relevancy     | On-topic, no digression     | None (needs judge)                  | Judge       |
+| Hallucination            | No fabricated facts         | None (needs judge)                  | Judge       |
+| Toxicity                 | Safe language               | Toxic term counting                 | Judge       |
+| Summarization            | Dense, accurate             | None (needs judge)                  | Judge       |
+| Reference Match (Suites) | Meets expected answer       | None (needs judge)                  | Judge       |
+| Conciseness (Custom)     | Word limit                  | Regex word-count                    | Judge       |
+| ... other custom         | User-defined                | Regex keyword matching              | Judge       |
 
 ---
 
-## 📚 Related Documentation
+## 🔒 Security Features (Oct 2026)
 
-- **AI_CHATBOT_EVOLUTION_PROPOSAL.md** - Industry trends and architecture benefits
-- **QUALITY_METRICS.md** - Detailed metric definitions
-- **README_QUALITY_METRICS.md** - User guide for dashboard
-- **IMPLEMENTATION_SUMMARY.md** - Technical architecture
+1. **No CORS Middleware** — Cross-origin requests fail at preflight
+2. **No Form-Body Parser** — Prevents POST from browsers (JSON-only)
+3. **URL Allowlist** — `ALLOWED_EVAL_HOSTS` limits chatbot targets
+4. **Localhost-Only Default** — `HOST=127.0.0.1` (need explicit HOST=0.0.0.0 to expose)
+5. **No Redirect Following** — Axios maxRedirects=0
+6. **Input Validation** — Prompts, metrics, endpoints validated before use
+
+---
+
+## 🎯 Best Practices by Role
+
+**For Developers:**
+
+- Edit scoring logic in `evaluate_responses.py` (live evaluation)
+- Edit dashboard in `public/deepeval.html`
+- Add routes in `server.js`
+- Framework code in `deepeval/` is target architecture (not yet live)
+
+**For QA/Testing:**
+
+- Add golden cases to `deepeval/datasets/golden/quality_qa_set.py`
+- Use suite mode for reproducible runs
+- Use `npm run eval -- --suite golden` in CI
+- Track 15-run trend to spot regressions
+
+**For Product Managers:**
+
+- Custom metrics defined via dashboard UI (no coding needed)
+- Use PDF export for stakeholder reports
+- Run comparison shows improvement/regression per metric
+- Baseline comparison enables A/B testing of chatbot versions
+
+---
+
+## 📞 Quick Lookup Table
+
+| Need                        | File                                                  | Line/Function                                          |
+| --------------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| Change pass threshold       | `evaluate_responses.py`                             | `PASS_THRESHOLD = 0.75`                              |
+| Add built-in metric         | `evaluate_responses.py`                             | `BUILTIN_METRICS` dict + `JUDGE_SYSTEM_PROMPT`     |
+| Adjust judge model          | `.env`                                              | `JUDGE_MODEL`, `JUDGE_API_KEY`, `JUDGE_BASE_URL` |
+| Change parallel concurrency | `server.js`                                         | `STATIC_CONCURRENCY = 3`                             |
+| Add custom metric (UI)      | `public/deepeval.html`                              | Dashboard → Settings tab                              |
+| Add golden Q&A              | `deepeval/datasets/golden/quality_qa_set.py`        | `get_quality_questions()`                            |
+| Add edge case               | `deepeval/datasets/synthetic/edge_cases.py`         | `generate_*_cases()` method                          |
+| CI regression gate          | `eval-cli.mjs`                                      | `npm run eval --`                                    |
+| Per-response reasoning      | `evaluate_responses.py` → `public/deepeval.html` | `individual_reasons` + breakdown UI                  |
+| Run comparison              | `public/deepeval.html`                              | `renderRunComparison()`                              |
+| Trend analysis              | `public/deepeval.html`                              | `renderHistoryTrend()`                               |
+
+---
+
+## 📝 Version & Last Update
+
+**Current Version:** 1.1.0
+**Last Updated:** October 6, 2026
+**Status:** Production-Ready
+
+**Oct 2026 Major Changes:**
+
+- ✅ LLM judge with stricter calibration + median scoring for borderline metrics
+- ✅ Test suites (golden + edge-cases) with Reference Match metric
+- ✅ Static mode: isolated conversations + parallel execution (3 at a time)
+- ✅ CLI regression gate with baseline comparison (eval-cli.mjs)
+- ✅ Per-response breakdown with judge reasoning
+- ✅ Server-side custom metric library (persists across reloads)
+- ✅ Run comparison and 15-run trend analytics
+- ✅ Security hardening: no CORS, URL allowlist, localhost-only default
+
+---
+
+**For more details on a specific topic, see:**
+
+- **CLAUDE.md** — Architecture constraints & design principles
+- **README.md** — Quick start & API overview
+- **QUICK_START.md** — Installation & setup guide
+- **QUALITY_METRICS.md** — Detailed metric definitions
+- **ARCHITECTURE_DIAGRAM.md** — Visual data flow diagrams

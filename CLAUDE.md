@@ -59,9 +59,13 @@ There are **two parallel evaluation code paths** in this repo. Know which one yo
 
 1. **What actually runs today:** `server.js` (root) spawns `evaluate_responses.py` (root) as a subprocess for every evaluation request from `public/deepeval.html`. This is the live, production code path — it computes scores, applies the unified 75% pass/fail bar, and feeds `public/deepeval.html`'s Quality Metrics tab.
 2. **The `deepeval/` framework package** (`evaluation/engine.py`, `IsolatedEvaluator`, `metrics.py`, `config/qa.py`, `config/prod.py`, `datasets/`, `tests/`) is a more elaborate, isolated-session evaluation library. **It is not yet wired into `server.js`** — nothing currently imports or spawns `engine.py`. Treat it as the target architecture to migrate to, not the current runtime.
-3. **`src/`** contains a byte-for-byte mirror of `server.js`, `public/*.html`, and the `deepeval/` package, created during the folder reorganization. It is **not used by `npm start`** (package.json's `main`/`start` script points at the root `server.js`). Keep it in sync manually whenever you touch the root files — there is no build step that does this for you.
+3. The old `src/` mirror was removed (Oct 2026): it was unused by `npm start` and had already drifted. There is now one copy of each file.
+4. **Scoring (Oct 2026):** `evaluate_responses.py` does not import the pip `deepeval` library (the local `deepeval/` package shadows it). Each response is scored by an LLM judge in its own stateless API call (`JUDGE_MODEL`/`JUDGE_API_KEY`/`JUDGE_BASE_URL`, falling back to `TEXT_MODEL_*`), with calibration anchors in `JUDGE_SYSTEM_PROMPT`. Any score within `BORDERLINE_MARGIN` (0.1) of the bar is judged `JUDGE_SAMPLES` (3) times and the median is used. Without a judge, heuristics cover only answer relevancy, toxicity and custom metrics; other metrics are reported as `unmeasured_metrics`. Only selected metrics are scored. Errored chatbot responses are excluded from scoring and make `overallPass` false.
+5. **Modes:** `dynamic` (one shared conversation), `static` and `suite` (each prompt in its own conversation, `STATIC_CONCURRENCY` at a time, judged without prior turns). Suites come from `deepeval/datasets/export_suites.py`, which loads the dataset files by path; suite cases carry a `reference` that is scored as the extra `reference_match` metric.
+6. **Security:** the server binds to `127.0.0.1` unless `HOST` is set, has no CORS middleware or form-body parser, and only evaluates chatbot URLs on localhost or in `ALLOWED_EVAL_HOSTS` (no redirects followed). Keep it that way: `/api/deepeval` makes outbound requests to user-supplied URLs.
+7. **CI gate:** `eval-cli.mjs` (`npm run eval`) drives `/api/deepeval` and compares against the last run with the same endpoint and suite/mode. Default `--max-drop` is 10 points, because identical golden-suite runs vary by up to ~12 points on `reference_match`.
 
-**Practical rule:** if your change needs to show up when the user runs `npm start`, it must land in the root `evaluate_responses.py` / `server.js` / `public/deepeval.html` — not just `deepeval/evaluation/engine.py`. Mirror the same edit into `src/` afterward so the two trees don't drift.
+**Practical rule:** if your change needs to show up when the user runs `npm start`, it must land in the root `evaluate_responses.py` / `server.js` / `public/deepeval.html`, not just `deepeval/evaluation/engine.py`.
 
 ---
 
@@ -168,7 +172,7 @@ class MyCustomMetric:
 4. Test: `pytest deepeval/tests/test_edge_cases.py -v`
 
 ### Task: Modify Thresholds
-1. **For the live dashboard:** Edit `PASS_THRESHOLD` in `evaluate_responses.py` (root) — this is what actually gates the Pass/Fail badges users see. Mirror the edit into `src/server/evaluate_responses.py`.
+1. **For the live dashboard:** Edit `PASS_THRESHOLD` in `evaluate_responses.py` (root) — this is what actually gates the Pass/Fail badges users see.
 2. **For the `deepeval/` framework:** Edit `deepeval/config/qa.py` and `deepeval/config/prod.py` → `METRIC_THRESHOLDS` (currently both set to 0.75 uniformly — change both together, they're meant to stay in lockstep unless you have a specific reason to diverge them again).
 3. **NEVER hardcode** thresholds in evaluation logic without a named constant (e.g. `PASS_THRESHOLD`)
 4. **Document why** you changed each threshold — update this file and `docs/QUALITY_METRICS.md`
@@ -244,7 +248,7 @@ The route used to block until the whole run finished, then send one `res.json(..
 3. **Don't skip error handling** — Graceful degradation is required
 4. **Don't write monolithic functions** — Keep functions focused
 5. **Don't add top-level directories** — Organize by feature, not layer
-6. **`evaluate_responses.py` is the live evaluation logic** — it's what `server.js` actually spawns today, so it's fair game to edit (keep `PASS_THRESHOLD` as the single source of truth for the pass bar). Long-term, logic should migrate into `deepeval/evaluation/engine.py`'s `IsolatedEvaluator`, but until that migration happens, don't let the two drift on behavior — and always mirror edits into `src/server/evaluate_responses.py`.
+6. **`evaluate_responses.py` is the live evaluation logic** — it's what `server.js` actually spawns today, so it's fair game to edit (keep `PASS_THRESHOLD` as the single source of truth for the pass bar). Long-term, logic should migrate into `deepeval/evaluation/engine.py`'s `IsolatedEvaluator`, but until that migration happens, don't let the two drift on behavior.
 7. **Don't ignore test failures** — Fix them before committing
 8. **Don't commit without updating docs** — Keep CODEBASE_STRUCTURE.md in sync
 9. **Don't remove metrics** — Deprecate instead (maintain backward compatibility)
@@ -364,7 +368,7 @@ pytest -m synthetic                       # Edge case tests only
 - No file I/O needed (streaming)
 
 ### With Dashboard
-- Metrics displayed in Quality Metrics tab (`public/deepeval.html`, mirrored in `src/public/deepeval.html`)
+- Metrics displayed in Quality Metrics tab (`public/deepeval.html`)
 - Radar chart for multi-dimensional view
 - Bar chart for ranked comparison
 - **Pass/Fail badges** (green/red) — every metric uses the same 75% bar (`PASS_THRESHOLD` in `evaluate_responses.py`); an overall summary banner shows `metrics_passed / metrics_total` and total pass rate above the metric grid

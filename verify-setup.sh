@@ -13,14 +13,12 @@ else
     exit 1
 fi
 
-# Check DeepEval
-echo "2️⃣  Checking DeepEval..."
-if python3 -c "from deepeval.metrics import AnswerRelevancyMetric" 2>/dev/null; then
-    DEEPEVAL_VERSION=$(python3 -c "import deepeval; print(deepeval.__version__)" 2>/dev/null)
-    echo "   ✅ DeepEval found: $DEEPEVAL_VERSION"
+# Evaluation engine needs only the Python standard library; scoring uses the LLM judge configured in .env
+echo "2️⃣  Checking evaluation engine..."
+if echo '{"prompts":["hi"],"responses":["hello"],"selected_metrics":["toxicity"]}' | env -u TEXT_MODEL_API_KEY python3 evaluate_responses.py >/dev/null 2>&1; then
+    echo "   ✅ evaluate_responses.py runs"
 else
-    echo "   ⚠️  DeepEval not installed"
-    echo "   Run: pip install -r requirements.txt"
+    echo "   ❌ evaluate_responses.py failed to run"
 fi
 
 # Check Node.js
