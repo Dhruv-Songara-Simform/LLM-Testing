@@ -31,6 +31,10 @@ This document provides a **complete reference** to every file's purpose, key imp
 .
 ├── server.js                          🔴 Express.js main server (npm start)
 ├── evaluate_responses.py              🔴 LLM judge engine (spawned per evaluation)
+├── evaluate_requirements.py           🟢 Requirement judge, 3rd isolated session [NEW Oct 2026]
+├── requirements.json                  Saved requirement list (created on first add)
+├── pytest.ini                         Disables the pip deepeval pytest plugin
+├── test-requirements.mjs              E2E test, fake model (npm run test:requirements)
 ├── eval-cli.mjs                       🟢 CLI regression gate (npm run eval) [NEW Oct 2026]
 ├── test-metrics.js                    Integration test (npm run test:metrics)
 ├── verify-setup.sh                    Environment validation (npm run verify)
@@ -152,6 +156,14 @@ const BUILTIN_METRIC_KEYS = {         // Label → key mapping
 - `TEXT_MODEL_API_KEY`, `TEXT_MODEL_BASE_URL`, `TEXT_MODEL` — Chatbot model
 - `PORT` (default 3000), `HOST` (default 127.0.0.1) — Server binding
 - `ALLOWED_EVAL_HOSTS` — Chatbot URL allowlist (comma-separated)
+- `FEATURE_REQUIREMENTS` — Enables requirement evaluation and `/api/requirements*` (off unless `true`)
+- `ARTIFACTS_DIR`, `REQUIREMENTS_FILE` — Optional overrides (used by tests to keep real data untouched)
+
+---
+
+### **evaluate_requirements.py** — Requirement Judge 🟢 (Oct 2026)
+
+**Purpose:** Checks each scored reply against the checked requirements in a third isolated session (own process, own `REQ_JUDGE_SYSTEM_PROMPT`, `REQ_JUDGE_*` model), and aggregates per-requirement Pass / Fail / Not tested / Not measured with coverage and confidence. Spawned by `server.js` → `runRequirementEvaluation()` after metric scoring; also used via `config` / `parse` / `validate` modes for limits and input checks. UI: `public/requirements.js` (📋 Requirements tab). Design and scoring model: `docs/FUTURE_ENHANCEMENTS.md`.
 
 ---
 
@@ -938,6 +950,7 @@ If --out specified: writes JSON report
 | Per-response reasoning      | `evaluate_responses.py` → `public/deepeval.html` | `individual_reasons` + breakdown UI                  |
 | Run comparison              | `public/deepeval.html`                              | `renderRunComparison()`                              |
 | Trend analysis              | `public/deepeval.html`                              | `renderHistoryTrend()`                               |
+| Requirement evaluation      | `evaluate_requirements.py` → `public/requirements.js` | `REQ_*` constants, 📋 Requirements tab             |
 
 ---
 

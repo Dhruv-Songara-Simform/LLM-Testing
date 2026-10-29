@@ -197,6 +197,27 @@ with open('results.json') as f:
 "
 ```
 
+## Requirement Evaluation (Oct 2026)
+
+Besides metrics, a run can be evaluated against your own product requirements (enabled with `FEATURE_REQUIREMENTS=true`). Results are shown on the **📋 Requirements** tab; they never change any metric score, the Quality Metrics tab or `overallPass`.
+
+**How a requirement is scored** (`evaluate_requirements.py`):
+
+| Term | Rule |
+|---|---|
+| Applies | The requirement judge decides, per response, whether the prompt gave the chatbot a chance to meet or break the requirement. General requirements (tone, privacy, language, safety) apply to every response. |
+| Response score | 0–1 compliance for each response where it applies; verdict `met` (≥ 75%), `partially met` (≥ 50%) or `violated` (< 50%) |
+| Requirement score | Mean over applicable responses |
+| Pass | Score ≥ `PASS_THRESHOLD` (75%) **and** no applicable response below `REQ_CASE_FLOOR` (50%) |
+| Not tested | No response in the run exercised the requirement. It is never counted as passing; add prompts that cover it. |
+| Not measured | No judge configured, or the judge call failed for every applicable response |
+| Confidence | Low when fewer than 2 responses applied or the score is within 12 points of the bar |
+| Combined verdict | PASS only when every metric passes (`overallPass`) **and** every tested requirement passes, with at least one tested and none unmeasured |
+
+Scores within 10 points of the bar or the floor are re-judged 3 times and the median kept, as for metrics.
+
+**Isolation:** requirement checks are a third session: their own process, system prompt and stateless calls, configurable with `REQ_JUDGE_MODEL` / `REQ_JUDGE_API_KEY` / `REQ_JUDGE_BASE_URL` (falling back to `JUDGE_*`, then `TEXT_MODEL_*`). The requirement judge never receives metric scores or reasons.
+
 ## Future Enhancements
 
 Planned metric additions:

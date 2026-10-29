@@ -26,13 +26,19 @@ if (!API_KEY || !BASE_URL || !MODEL) {
   process.exit(1);
 }
 
-const ARTIFACTS_DIR = join(__dirname, 'artifacts');
+const ARTIFACTS_DIR = process.env.ARTIFACTS_DIR || join(__dirname, 'artifacts');
 if (!existsSync(ARTIFACTS_DIR)) {
   mkdirSync(ARTIFACTS_DIR, { recursive: true });
 }
 
 const CUSTOM_METRICS_FILE = join(__dirname, 'custom_metrics.json');
 const STATIC_CONCURRENCY = 3;
+
+// Requirement-based evaluation (docs/FUTURE_ENHANCEMENTS.md #1/#2). Off unless FEATURE_REQUIREMENTS=true;
+// when off, requirements in a run payload are ignored and every route below except /config returns 404.
+const FEATURE_REQUIREMENTS = /^(1|true|yes|on)$/i.test(process.env.FEATURE_REQUIREMENTS || '');
+const REQUIREMENTS_FILE = process.env.REQUIREMENTS_FILE || join(__dirname, 'requirements.json');
+const REQUIREMENTS_SCRIPT = join(__dirname, 'evaluate_requirements.py');
 
 // The server sends requests to whatever chatbot URL an evaluation names, so only
 // local hosts plus hosts explicitly listed in ALLOWED_EVAL_HOSTS may be targeted.
@@ -66,6 +72,31 @@ function readCustomMetricLibrary() {
   if (!existsSync(CUSTOM_METRICS_FILE)) return [];
   return JSON.parse(readFileSync(CUSTOM_METRICS_FILE, 'utf8'));
 }
+
+// Limits, parsing and validation live in evaluate_requirements.py so there is one source of truth.
+function runRequirementsTool(mode, input) {
+  const output = execFileSync('python3', [REQUIREMENTS_SCRIPT, mode], {
+    input: input === undefined ? '' : JSON.stringify(input),
+    encoding: 'utf8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const result = JSON.parse(output);
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+let requirementsConfig = null;
+function getRequirementsConfig() {
+  if (!requirementsConfig) requirementsConfig = runRequirementsTool('config');
+  return requirementsConfig;
+}
+
+function readRequirementLibrary() {
+  if (!existsSync(REQUIREMENTS_FILE)) return [];
+  return JSON.parse(readFileSync(REQUIREMENTS_FILE, 'utf8'));
+}
+
+const normaliseRequirement = text => text.toLowerCase().replace(/\s+/g, ' ').trim();
 
 async function mapWithConcurrency(items, limit, fn) {
   const results = new Array(items.length);
@@ -166,6 +197,91 @@ function runPythonEvaluation({ prompts, responses, customMetrics, selectedMetric
     }));
     python.stdin.end();
   });
+}
+
+// Third isolated session: requirement checks run in their own process with their own judge prompt.
+// Only the prompts, replies, context and requirement texts are sent — never metric scores or reasons.
+function runRequirementEvaluation({ prompts, responses, indices, requirements, systemPrompt, isolated }, onProgress) {
+  return new Promise((resolve, reject) => {
+    const python = spawn('python3', [REQUIREMENTS_SCRIPT]);
+    let stdout = '';
+    let stderr = '';
+    let stderrTail = '';
+
+    python.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    python.stderr.on('data', (data) => {
+      const text = data.toString();
+      stderr += text;
+      stderrTail += text;
+      const lines = stderrTail.split('\n');
+      stderrTail = lines.pop();
+      for (const line of lines) {
+        const match = line.match(/^PROGRESS:(\d+):(\d+)$/);
+        if (match && onProgress) {
+          onProgress(parseInt(match[1], 10), parseInt(match[2], 10));
+        }
+      }
+    });
+
+    python.on('close', (code) => {
+      let result;
+      try {
+        result = JSON.parse(stdout);
+      } catch (e) {
+        console.error(`Requirement evaluation exited ${code}; unparseable output:`, stderr);
+        reject(new Error('Requirement evaluation failed (see server log)'));
+        return;
+      }
+      if (code !== 0 || result.error) {
+        reject(new Error(`Requirement evaluation failed: ${result.error || `exit code ${code}`}`));
+        return;
+      }
+      resolve(result);
+    });
+
+    python.on('error', (err) => {
+      reject(new Error(`Could not start requirement evaluator: ${err.message}`));
+    });
+
+    python.stdin.write(JSON.stringify({
+      prompts,
+      responses,
+      indices,
+      requirements,
+      system_prompt: systemPrompt,
+      isolated,
+    }));
+    python.stdin.end();
+  });
+}
+
+// Used when the requirement evaluator itself crashes: the metric results are kept and every
+// requirement is reported as Not measured instead of failing the whole run.
+function unmeasuredRequirementResults(requirements, indices, errorMessage) {
+  const config = getRequirementsConfig();
+  const reason = `Requirement evaluation failed: ${errorMessage}`;
+  return {
+    judgeModel: config.judgeModel,
+    session: 'requirement_judge',
+    thresholds: config.thresholds,
+    error: errorMessage,
+    summary: {
+      selected: requirements.length, tested: 0, passed: 0, failed: 0, notTested: 0,
+      notMeasured: requirements.length, lowConfidence: 0, coverage: 0, passRate: null, averageScore: null,
+    },
+    requirements: requirements.map(r => ({
+      id: r.id, text: r.text, applicable: 0, notMeasuredResponses: indices.length, score: null, min: null, max: null,
+      worstIndex: null, worstReason: '', failedBy: [], status: 'Not measured', passed: null, confidence: null,
+    })),
+    perResponse: indices.map(index => ({
+      index,
+      results: Object.fromEntries(requirements.map(r => [r.id, { applies: null, score: null, verdict: 'not measured', reason, samples: 0 }])),
+    })),
+    judgeCalls: 0,
+  };
 }
 
 const client = axios.create({
@@ -354,6 +470,97 @@ app.delete('/api/custom-metrics/:id', (req, res) => {
   }
 });
 
+app.get('/api/requirements/config', (_req, res) => {
+  if (!FEATURE_REQUIREMENTS) return res.json({ enabled: false });
+  try {
+    res.json({ enabled: true, ...getRequirementsConfig(), chatModel: MODEL });
+  } catch (error) {
+    res.status(500).json({ error: `Could not load requirement settings: ${error.message}` });
+  }
+});
+
+app.use('/api/requirements', (_req, res, next) => {
+  if (!FEATURE_REQUIREMENTS) return res.status(404).json({ error: 'Requirement evaluation is disabled (FEATURE_REQUIREMENTS)' });
+  next();
+});
+
+app.get('/api/requirements', (_req, res) => {
+  try {
+    res.json(readRequirementLibrary());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Parse and validate only: no model call, nothing saved.
+app.post('/api/requirements/preview', (req, res) => {
+  const text = req.body?.text;
+  if (typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'Requirement text is required' });
+  }
+  if (text.length > 200000) {
+    return res.status(400).json({ error: 'Requirement text is too long (max 200,000 characters)' });
+  }
+  try {
+    res.json(runRequirementsTool('parse', { text }));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requirements', (req, res) => {
+  const text = req.body?.text;
+  if (typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'Requirement text is required' });
+  }
+  if (text.length > 200000) {
+    return res.status(400).json({ error: 'Requirement text is too long (max 200,000 characters)' });
+  }
+  try {
+    const { maxRequirements } = getRequirementsConfig();
+    const parsed = runRequirementsTool('parse', { text });
+    const library = readRequirementLibrary();
+    const known = new Set(library.map(r => normaliseRequirement(r.text)));
+    let nextNumber = library.reduce((max, r) => Math.max(max, parseInt(r.id.slice(2), 10) || 0), 0) + 1;
+    const added = [];
+    const duplicates = [];
+    const overLimit = [];
+    for (const item of parsed.requirements) {
+      const key = normaliseRequirement(item.text);
+      if (known.has(key)) {
+        duplicates.push(item);
+        continue;
+      }
+      if (library.length + added.length >= maxRequirements) {
+        overLimit.push(item);
+        continue;
+      }
+      known.add(key);
+      added.push({ id: `R-${String(nextNumber++).padStart(2, '0')}`, text: item.text, createdAt: new Date().toISOString() });
+    }
+    if (added.length) {
+      writeFileSync(REQUIREMENTS_FILE, JSON.stringify([...library, ...added], null, 2));
+    }
+    res.status(added.length ? 201 : 200).json({ added, duplicates, overLimit, rejected: parsed.rejected });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/requirements/:id', (req, res) => {
+  try {
+    const library = readRequirementLibrary();
+    const remaining = library.filter(r => r.id !== req.params.id);
+    if (remaining.length === library.length) {
+      return res.status(404).json({ error: 'Requirement not found' });
+    }
+    writeFileSync(REQUIREMENTS_FILE, JSON.stringify(remaining, null, 2));
+    res.status(204).end();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/deepeval', async (req, res) => {
   const { apiEndpoint, testPrompts = [], evaluationMode = 'static', suiteId, initialPrompt, numberOfTests = 5, evaluationCriteria = {}, selectedMetrics = {} } = req.body;
 
@@ -377,6 +584,23 @@ app.post('/api/deepeval', async (req, res) => {
   }
   if (evaluationMode === 'dynamic' && !initialPrompt) {
     return res.status(400).json({ error: 'An initial question is required for dynamic mode' });
+  }
+
+  // Requirements are only read when the feature is on; otherwise the run is exactly as before.
+  let requirements = [];
+  if (FEATURE_REQUIREMENTS && req.body.requirements !== undefined && req.body.requirements !== null) {
+    if (!Array.isArray(req.body.requirements)) {
+      return res.status(400).json({ error: 'requirements must be an array of { id, text }' });
+    }
+    requirements = req.body.requirements.map(r => ({ id: String(r?.id ?? ''), text: String(r?.text ?? '').trim() }));
+    if (requirements.length) {
+      try {
+        const { errors } = runRequirementsTool('validate', { requirements });
+        if (errors.length) return res.status(400).json({ error: errors.join(' ') });
+      } catch (error) {
+        return res.status(500).json({ error: `Could not validate requirements: ${error.message}` });
+      }
+    }
   }
 
   let suite = null;
@@ -500,6 +724,8 @@ app.post('/api/deepeval', async (req, res) => {
     }
 
     const metricCount = builtinKeys.length + customMetricsList.length + (suite ? 1 : 0);
+    // With requirements, metric scoring ends at 85% and requirement checks take 85-92%.
+    const metricSpan = requirements.length ? 20 : 27;
     sendEvent('progress', { percent: 65, message: `Scoring ${evaluatedIndices.length} responses on ${metricCount} metrics...` });
 
     const quality = await runPythonEvaluation(
@@ -513,7 +739,7 @@ app.post('/api/deepeval', async (req, res) => {
         isolated,
       },
       (done, total) => {
-        sendEvent('progress', { percent: 65 + Math.round((done / total) * 27), message: `Scored response ${done}/${total}...` });
+        sendEvent('progress', { percent: 65 + Math.round((done / total) * metricSpan), message: `Scored response ${done}/${total}...` });
       }
     );
 
@@ -531,6 +757,34 @@ app.post('/api/deepeval', async (req, res) => {
     metrics.overallPassRate = quality.overall_pass_rate ?? 0;
     // A run where the chatbot failed to answer some prompts can't be an overall pass.
     metrics.overallPass = Boolean(quality.overall_pass) && metrics.failedResponses.length === 0;
+
+    if (requirements.length) {
+      sendEvent('progress', { percent: 85, message: `Checking ${requirements.length} requirements in a separate judge session...` });
+      let requirementResults;
+      try {
+        requirementResults = await runRequirementEvaluation(
+          {
+            prompts: evaluatedIndices.map(i => metrics.prompts[i]),
+            responses: evaluatedIndices.map(i => metrics.responses[i]),
+            indices: evaluatedIndices,
+            requirements,
+            systemPrompt,
+            isolated,
+          },
+          (done, total) => {
+            sendEvent('progress', { percent: 85 + Math.round((done / total) * 7), message: `Checked requirements for response ${done}/${total}...` });
+          }
+        );
+      } catch (error) {
+        // Metric results are already complete, so a requirement failure never loses the run.
+        console.error('Requirement evaluation error:', error.message);
+        requirementResults = unmeasuredRequirementResults(requirements, evaluatedIndices, error.message);
+      }
+      const s = requirementResults.summary;
+      requirementResults.combinedPass = metrics.overallPass && s.failed === 0 && s.notMeasured === 0 && s.tested > 0;
+      metrics.requirements = requirements;
+      metrics.requirementResults = requirementResults;
+    }
 
     sendEvent('progress', { percent: 92, message: 'Saving results...' });
 
@@ -608,6 +862,21 @@ function summarizeArtifact(filename) {
     scoringMethod: m.scoringMethod || 'legacy',
     scores: Object.fromEntries(Object.entries(quality).map(([k, q]) => [k, q.avg])),
     customMetrics: (m.customMetrics || []).map(({ id, name, desc, params }) => ({ id, name, desc, params: params || [] })),
+    // Requirement fields are only present for runs that evaluated requirements.
+    ...(m.requirementResults ? requirementSummary(m.requirementResults) : {}),
+  };
+}
+
+function requirementSummary(results) {
+  const s = results.summary || {};
+  return {
+    requirementsSelected: s.selected ?? 0,
+    requirementsTested: s.tested ?? 0,
+    requirementsPassed: s.passed ?? 0,
+    requirementsPassRate: s.passRate ?? null,
+    requirementsCombinedPass: Boolean(results.combinedPass),
+    // Keyed by text so a renumbered requirement list still compares correctly between runs.
+    requirementScores: Object.fromEntries((results.requirements || []).map(r => [r.text, { id: r.id, score: r.score, status: r.status }])),
   };
 }
 
@@ -652,4 +921,5 @@ app.listen(PORT, HOST, () => {
   console.log(`Evaluation endpoint allowlist: ${[...ALLOWED_EVAL_HOSTS].join(', ')}`);
   console.log(`Using model: ${MODEL}`);
   console.log(`Artifacts stored in: ${ARTIFACTS_DIR}`);
+  console.log(`Requirement evaluation: ${FEATURE_REQUIREMENTS ? 'enabled' : 'disabled'} (FEATURE_REQUIREMENTS)`);
 });

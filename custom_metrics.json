@@ -1,21 +1,21 @@
 [
   {
-    "id": "cm_mv4u3jtqeaae",
-    "name": "Clarity",
-    "desc": "Response should be easy to understand",
+    "id": "cm_mvth5zf5d40c",
+    "name": "Simplicity",
+    "desc": "Response should be in simple language",
     "params": [
-      "should not have complex terminologies",
-      "should not have passive voice"
+      "no complex terminologies",
+      "No passive voice"
     ],
-    "createdAt": "2026-10-12T05:51:21.374Z"
+    "createdAt": "2026-10-29T11:43:34.290Z"
   },
   {
-    "id": "cm_mv4u44rk7730",
-    "name": "Conciseness",
-    "desc": "Response should not be too lengthy",
+    "id": "cm_mvth6jf86ea9",
+    "name": "Descriptiveness",
+    "desc": "Response should be in descriptive manner",
     "params": [
-      "should not be more than 500 words"
+      "Should be more than 100 words"
     ],
-    "createdAt": "2026-10-12T05:51:48.512Z"
+    "createdAt": "2026-10-29T11:44:00.212Z"
   }
 ]

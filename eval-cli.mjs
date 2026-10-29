@@ -28,7 +28,11 @@ Options:
   --baseline <latest|none|runId>  Run to compare against                (default: latest)
   --max-drop <points>       Fail if any metric drops more than this vs baseline (default: 10;
                             identical golden-suite runs vary by up to ~12 points on Reference Match)
-  --out <file>              Write a JSON summary for CI artifacts`;
+  --out <file>              Write a JSON summary for CI artifacts
+
+Requirements (opt-in; needs FEATURE_REQUIREMENTS=true on the server):
+  --requirements <file>     Evaluate these requirements too (.txt/.md, one per line, max 100 words each)
+  --gate-requirements       Also fail the gate when a tested requirement fails or is not measured`;
 
 function parseArgs(argv) {
   const args = {};
@@ -36,7 +40,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`Unexpected argument: ${a}`);
     const key = a.slice(2);
-    if (key === 'start-server' || key === 'help') {
+    if (key === 'start-server' || key === 'help' || key === 'gate-requirements') {
       args[key] = true;
     } else {
       if (i + 1 >= argv.length) throw new Error(`Missing value for --${key}`);
@@ -132,10 +136,29 @@ async function main() {
       });
     }
 
+    // Requirements are parsed by the server (same rules as the dashboard) and sent as R-01, R-02, ...
+    let requirements = [];
+    if (args['gate-requirements'] && !args.requirements) throw new Error('--gate-requirements needs --requirements <file>');
+    if (args.requirements) {
+      const config = await (await fetch(`${server}/api/requirements/config`)).json();
+      if (!config.enabled) throw new Error('The server has requirement evaluation disabled; set FEATURE_REQUIREMENTS=true in .env');
+      const res = await fetch(`${server}/api/requirements/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: readFileSync(args.requirements, 'utf8') }),
+      });
+      const parsed = await res.json();
+      if (!res.ok) throw new Error(parsed.error || `Could not parse ${args.requirements}`);
+      if (parsed.rejected.length) throw new Error(`Requirements file has invalid lines: ${parsed.rejected.map(r => r.error).join(' ')}`);
+      if (!parsed.requirements.length) throw new Error(`No requirements found in ${args.requirements}`);
+      requirements = parsed.requirements.map((r, i) => ({ id: `R-${String(i + 1).padStart(2, '0')}`, text: r.text }));
+    }
+
     const payload = {
       apiEndpoint: args.endpoint || `${server}/api/chat`,
       evaluationCriteria: { systemPrompt: args['system-prompt'] || null },
       selectedMetrics: { builtin, custom },
+      ...(requirements.length ? { requirements } : {}),
     };
     if (args.dynamic) {
       Object.assign(payload, { evaluationMode: 'dynamic', initialPrompt: args.dynamic, numberOfTests: Number(args.turns || 3) });
@@ -187,12 +210,29 @@ async function main() {
       console.log(`${r.name.slice(0, 25).padEnd(26)}${pct(r.score).padStart(7)}${pct(r.baseline).padStart(7)}${d.padStart(6)}  ${r.passed ? 'PASS' : 'FAIL'}`);
     }
 
+    const rr = m.requirementResults;
+    if (rr) {
+      const s = rr.summary;
+      console.log(`\nRequirements (separate judge session${rr.judgeModel ? `, ${rr.judgeModel}` : ''}): ${s.passed}/${s.tested} tested pass · coverage ${s.tested}/${s.selected}`);
+      console.log(`${'Requirement'.padEnd(46)}${'Score'.padStart(7)}  Result`);
+      for (const r of rr.requirements) {
+        console.log(`${`${r.id} ${r.text}`.slice(0, 45).padEnd(46)}${pct(r.score).padStart(7)}  ${r.status.toUpperCase()}`);
+      }
+      if (args['gate-requirements']) {
+        rr.requirements.filter(r => r.status === 'Fail').forEach(r => failures.push(`Requirement ${r.id} failed (${pct(r.score)}${r.failedBy.includes('caseFloor') ? ', a response below the floor' : ''})`));
+        rr.requirements.filter(r => r.status === 'Not measured').forEach(r => failures.push(`Requirement ${r.id} could not be measured`));
+      }
+    }
+
     const gatePassed = failures.length === 0;
     console.log(`\nQuality gate: ${gatePassed ? 'PASSED' : 'FAILED'}`);
     failures.forEach(f => console.log(`  - ${f}`));
 
     if (args.out) {
-      writeFileSync(args.out, JSON.stringify({ runId: result.conversationId, gatePassed, failures, baseline: baseline?.id || null, metrics: rows }, null, 2));
+      writeFileSync(args.out, JSON.stringify({
+        runId: result.conversationId, gatePassed, failures, baseline: baseline?.id || null, metrics: rows,
+        ...(rr ? { requirements: { summary: rr.summary, combinedPass: rr.combinedPass, results: rr.requirements.map(({ id, text, status, score, min, applicable, confidence }) => ({ id, text, status, score, min, applicable, confidence })) } } : {}),
+      }, null, 2));
     }
     return gatePassed ? 0 : 1;
   } finally {

@@ -65,6 +65,8 @@ There are **two parallel evaluation code paths** in this repo. Know which one yo
 6. **Security:** the server binds to `127.0.0.1` unless `HOST` is set, has no CORS middleware or form-body parser, and only evaluates chatbot URLs on localhost or in `ALLOWED_EVAL_HOSTS` (no redirects followed). Keep it that way: `/api/deepeval` makes outbound requests to user-supplied URLs.
 7. **CI gate:** `eval-cli.mjs` (`npm run eval`) drives `/api/deepeval` and compares against the last run with the same endpoint and suite/mode. Default `--max-drop` is 10 points, because identical golden-suite runs vary by up to ~12 points on `reference_match`.
 
+8. **Requirement evaluation (Oct 2026, `FEATURE_REQUIREMENTS`):** checked requirements sent with `/api/deepeval` are evaluated by `evaluate_requirements.py`, a **third isolated session** (own process, own system prompt, `REQ_JUDGE_*` falling back to `JUDGE_*`/`TEXT_MODEL_*`) that never sees metric scores or reasons. It imports `PASS_THRESHOLD`/`BORDERLINE_MARGIN`/`JUDGE_SAMPLES` from `evaluate_responses.py` (don't copy them) and owns `MAX_REQUIREMENT_WORDS` (100), `MAX_REQUIREMENTS` (50), `REQ_BATCH_SIZE`, `REQ_CASE_FLOOR` (0.5), `MIN_APPLICABLE_RESPONSES`, `NOISE_BAND`. Results go to optional `metrics.requirements` / `metrics.requirementResults` and the 📋 Requirements tab (`public/requirements.js`, called only through `reqHook()`); they never change `qualityMetrics` or `overallPass`. With the flag off or no requirements checked, a run is exactly as before. Tests: `npm run test:requirements` and `deepeval/tests/test_requirement_*.py`.
+
 **Practical rule:** if your change needs to show up when the user runs `npm start`, it must land in the root `evaluate_responses.py` / `server.js` / `public/deepeval.html`, not just `deepeval/evaluation/engine.py`.
 
 ---
@@ -220,7 +222,7 @@ The route used to block until the whole run finished, then send one `res.json(..
 
 **Why:** the old design meant the progress bar had no real signal to show — it advanced to ~10% client-side, then sat frozen for the entire evaluation (which can take 30s-4min), then jumped straight to 100% once the one blocking response arrived. Streaming lets `public/deepeval.html` (`consumeProgressStream()`) show genuine per-prompt/per-metric progress the whole way through.
 
-**If you add a new phase to the evaluation pipeline:** emit a `sendEvent('progress', {percent, message})` call for it in `server.js`, and keep the percent ranges roughly in the existing allocation (0-10% setup, 10-65% chat generation, 65-92% quality metrics, 92-100% saving/wrap-up) so the bar doesn't regress or jump backwards.
+**If you add a new phase to the evaluation pipeline:** emit a `sendEvent('progress', {percent, message})` call for it in `server.js`, and keep the percent ranges roughly in the existing allocation (0-10% setup, 10-65% chat generation, 65-92% quality metrics — 65-85% when requirements are checked, with 85-92% for requirement checks — 92-100% saving/wrap-up) so the bar doesn't regress or jump backwards.
 
 **A curl/CI example that expects a single JSON body (like the one in `docs/README_QUALITY_METRICS.md`'s CI/CD section) needs to consume the stream and read the `complete` event, not `JSON.parse` the raw body.**
 

@@ -228,6 +228,23 @@ KEY DIFFERENCE: eval_def456 has NO memory of chat_abc123
 
 ---
 
+## Three Isolated Sessions (live runtime, Oct 2026)
+
+```
+POST /api/deepeval  (server.js)
+   │
+   ├─ 1. Chat session ──────────► chatbot endpoint          (prompts; prior turns in dynamic mode)
+   │        responses
+   ├─ 2. Metric judge ─────────► evaluate_responses.py     (own process; JUDGE_* model)
+   │        qualityMetrics, overallPass          ← unchanged by requirements
+   │
+   └─ 3. Requirement judge ────► evaluate_requirements.py  (own process + system prompt; REQ_JUDGE_* model)
+            requirementResults   ← only when requirements are checked and FEATURE_REQUIREMENTS=true
+            input: prompts, replies, context, requirement texts — never metric scores or reasons
+```
+
+Progress on the SSE stream: 0–10% setup, 10–65% chat, 65–85% metrics (65–92% when no requirements are checked), 85–92% requirements, 92–100% saving.
+
 ## File Organization by Purpose
 
 ```

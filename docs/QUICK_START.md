@@ -90,6 +90,24 @@ Each metric is scored 0-100%:
 **Toxicity**: Any harmful content?
 **And 6 more...**
 
+## 📋 Evaluate Against Your Requirements
+
+1. Make sure `.env` has `FEATURE_REQUIREMENTS=true` and restart `npm start`.
+2. On the DeepEval page, scroll to **📋 Requirements** in the Configuration card.
+3. Paste requirements one per line (or **Load .txt / .md file**), e.g.
+   ```
+   - The assistant must greet the user politely
+   - Never ask for or repeat passwords or card numbers
+   - Refund answers must mention the 30-day window
+   ```
+   Lines over 100 words are shown in red with their line number and are not added.
+4. Click **➕ Add requirements**. They appear as a checklist (R-01, R-02, …); uncheck any you don't want in this run. The Ready line shows `N metrics selected · M requirements selected`.
+5. Pick prompts that exercise your requirements (a requirement no prompt touches is reported as *Not tested*, never as a pass), then click **▶ Run DeepEval**.
+6. Open the **📋 Requirements** tab for the verdict, scorecard, charts, heatmap and per-response reasons. The **⭐ Quality Metrics** tab is exactly as before.
+7. In **📁 Artifacts**, download the **Requirements Report** PDF, or export CSV/JSON.
+
+Set `REQ_JUDGE_MODEL` (plus `REQ_JUDGE_API_KEY`/`REQ_JUDGE_BASE_URL`) to use a different model for requirement checks than the chatbot under test.
+
 ## 💡 Tips & Tricks
 
 ### Fast Evaluation

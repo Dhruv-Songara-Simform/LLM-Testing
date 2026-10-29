@@ -268,6 +268,23 @@ curl -N -s -X POST http://localhost:3000/api/deepeval \
 └── README_QUALITY_METRICS.md   # This file
 ```
 
+## 📋 Reading the Requirements Page
+
+When requirements were checked before the run, the **📋 Requirements** tab shows:
+
+- **Banner:** the combined DeepEval verdict (metrics **and** requirements), `X of Y tested requirements pass`, and coverage (`tested ÷ selected`).
+- **Scorecard:** one card per requirement with its score, ✅ Pass / ❌ Fail / ⚪ Not tested / ⚠️ Not measured, why it failed (average below 75%, or one response below the 50% floor), confidence and the weakest reason.
+- **Charts:** radar against the 75% bar, bar chart by status and a status donut, each with a data table.
+- **Heatmap:** requirements × responses; each cell is the judge's score and verdict (`n/a` = not exercised by that prompt).
+- **Per-requirement breakdown:** every response's verdict, score and reason, with the prompt and the reply.
+- **Not tested list** and **run details** (judge model, rules, number of judge calls).
+
+Exports (Artifacts tab): **Download Requirements Report** (PDF with scorecard, charts, findings, methodology and sign-off), **CSV** (one row per requirement, spreadsheet-safe) and **JSON**. The existing PDF report is unchanged.
+
+**API:** `POST /api/deepeval` accepts an optional `requirements: [{ "id": "R-01", "text": "..." }]` (at most 50, 100 words each). The `complete` event then carries `metrics.requirements` (snapshot) and `metrics.requirementResults`. The library lives at `GET/POST /api/requirements`, `DELETE /api/requirements/:id`, `POST /api/requirements/preview` and `GET /api/requirements/config`.
+
+**CI:** `npm run eval -- --requirements reqs.txt` reports requirement results; add `--gate-requirements` to fail the gate on a failing or unmeasured requirement.
+
 ## 🐛 Troubleshooting
 
 ### "Metrics unavailable" Error
